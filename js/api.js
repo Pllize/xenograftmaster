@@ -56,6 +56,16 @@ const api = (() => {
     async saveCode(data) { return post('saveCode', data); },
     async deleteCode(codeType, codeValue) { return post('deleteCode', { codeType, codeValue }); },
 
+    // Substances
+    async getSubstances() { return get({ action: 'getSubstances' }); },
+    async saveSubstance(data) { return post('saveSubstance', data); },
+    async deleteSubstance(substanceId) { return post('deleteSubstance', { substanceId }); },
+
+    // Competitors
+    async getCompetitors() { return get({ action: 'getCompetitors' }); },
+    async saveCompetitor(data) { return post('saveCompetitor', data); },
+    async deleteCompetitor(competitorId) { return post('deleteCompetitor', { competitorId }); },
+
     // Export/Import
     async exportAll() { return get({ action: 'exportAll' }); },
     async importAll(snapshot) { return post('importAll', snapshot); },
@@ -105,7 +115,8 @@ const api = (() => {
 
       groups.forEach(g => {
         const grpData = groupMap[g.groupId];
-        analysisGroups[g.groupName] = Object.values(grpData.subjects);
+        const displayName = g.substanceName || g.groupName || ('Group ' + g.groupNumber);
+        analysisGroups[displayName] = Object.values(grpData.subjects);
         Object.values(grpData.subjects).forEach(s => {
           Object.keys(s.vols).forEach(d => allDays.add(Number(d)));
         });
@@ -115,7 +126,13 @@ const api = (() => {
         groups: analysisGroups,
         days: Array.from(allDays).sort((a, b) => a - b),
         groupMeta: groups.reduce((acc, g) => {
-          acc[g.groupName] = { isControl: g.isControl, groupNumber: g.groupNumber };
+          const displayName = g.substanceName || g.groupName || ('Group ' + g.groupNumber);
+          acc[displayName] = {
+            isControl: g.isControl || g.groupRole === 'vehicle' || g.groupRole === 'control',
+            groupNumber: g.groupNumber,
+            groupRole: g.groupRole || 'SB',
+            groupId: g.groupId
+          };
           return acc;
         }, {})
       };

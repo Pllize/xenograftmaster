@@ -1,14 +1,17 @@
 // Admin / Settings view
 const AdminView = (() => {
+  let currentAdminTab = 'sheets';
+
   async function render() {
     App.setActiveNav('/admin');
     App.renderContent(`
       <h4 class="fw-bold mb-3">관리</h4>
       <ul class="nav nav-tabs mb-3" id="adminTabs">
         <li class="nav-item"><a class="nav-link active" href="#" onclick="AdminView.switchTab('sheets',this);return false;">Google Sheets 설정</a></li>
-        <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('competitor',this);return false;">경쟁사 데이터</a></li>
-        <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('backup',this);return false;">백업/복원</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('substances',this);return false;">물질 관리</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('competitors',this);return false;">경쟁사 DB</a></li>
         <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('codes',this);return false;">공통 코드</a></li>
+        <li class="nav-item"><a class="nav-link" href="#" onclick="AdminView.switchTab('backup',this);return false;">백업/복원</a></li>
       </ul>
       <div id="adminContent"></div>
     `);
@@ -16,6 +19,7 @@ const AdminView = (() => {
   }
 
   function switchTab(tab, el) {
+    currentAdminTab = tab;
     document.querySelectorAll('#adminTabs .nav-link').forEach(a => a.classList.remove('active'));
     if (el) el.classList.add('active');
     else {
@@ -23,12 +27,15 @@ const AdminView = (() => {
       if (link) link.classList.add('active');
     }
     const c = document.getElementById('adminContent');
+    if (!c) return;
     if (tab === 'sheets') renderSheets(c);
-    else if (tab === 'competitor') renderCompetitor(c);
-    else if (tab === 'backup') renderBackup(c);
+    else if (tab === 'substances') renderSubstances(c);
+    else if (tab === 'competitors') renderCompetitors(c);
     else if (tab === 'codes') renderCodes(c);
+    else if (tab === 'backup') renderBackup(c);
   }
 
+  // ---- Google Sheets Settings ----
   function renderSheets(c) {
     const current = localStorage.getItem('xm_apps_script_url') || '';
     c.innerHTML = `
@@ -36,9 +43,9 @@ const AdminView = (() => {
         <h6 class="fw-bold mb-3">Google Sheets (Apps Script) 연결 설정</h6>
         <ol class="mb-3 small text-muted">
           <li>Google Apps Script에서 <code>gas/Code.gs</code>를 새 프로젝트에 붙여넣기</li>
+          <li><code>SHEET_ID</code>를 Spreadsheet ID로 설정</li>
           <li>웹 앱으로 배포: 실행 계정 "나", 액세스 "조직 내 모든 사용자"</li>
           <li>웹 앱 URL을 아래에 입력</li>
-          <li>Google Spreadsheet ID를 <code>Code.gs</code>의 <code>SHEET_ID</code>에 설정</li>
         </ol>
         <div class="row g-2 align-items-end">
           <div class="col-md-9">
@@ -74,18 +81,250 @@ const AdminView = (() => {
     }
   }
 
-  function renderCompetitor(c) {
+  // ---- Substances ----
+  async function renderSubstances(c) {
+    let substances = [];
+    try { substances = await api.getSubstances(); } catch (e) {}
+
+    const typeOptions = ['SB', 'comparator', 'vehicle'].map(t => `<option value="${t}">${t}</option>`).join('');
+
     c.innerHTML = `
       <div class="card p-4">
-        <h6 class="fw-bold mb-3">경쟁사 데이터 등록</h6>
-        <p class="text-muted small">경쟁사 데이터는 시험 등록 시 "데이터 출처: 경쟁사"를 선택하여 추가하거나, 아래 버튼으로 바로 추가할 수 있습니다.</p>
-        <div class="d-flex gap-2">
-          <button class="btn btn-primary" onclick="Router.navigate('/study/new?type=competitor')">+ 경쟁사 데이터 등록</button>
-          <button class="btn btn-outline-secondary" onclick="Router.navigate('/data')">데이터 관리로 이동</button>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h6 class="fw-bold mb-0">물질 관리</h6>
+          <button class="btn btn-primary btn-sm" onclick="AdminView.showSubstanceForm()">+ 추가</button>
+        </div>
+        <div id="substanceFormWrap"></div>
+        <div class="table-responsive mt-2">
+          <table class="table table-sm table-bordered table-hover">
+            <thead><tr><th>물질명</th><th>유형</th><th>Target</th><th>MOA</th><th>비고</th><th></th></tr></thead>
+            <tbody>
+              ${substances.length ? substances.map(s => `<tr>
+                <td class="fw-semibold">${s.substanceName || ''}</td>
+                <td><span class="badge ${s.type === 'SB' ? 'bg-primary' : s.type === 'comparator' ? 'bg-danger' : 'bg-secondary'}">${s.type || ''}</span></td>
+                <td>${s.target || ''}</td>
+                <td>${s.moa || ''}</td>
+                <td class="small text-muted">${s.note || ''}</td>
+                <td><button class="btn btn-xs btn-sm btn-outline-danger" onclick="AdminView.deleteSubstance('${s.substanceId}','${(s.substanceName||'').replace(/'/g,'')}')">삭제</button></td>
+              </tr>`).join('') : '<tr><td colspan="6" class="text-center text-muted">등록된 물질이 없습니다.</td></tr>'}
+            </tbody>
+          </table>
         </div>
       </div>`;
   }
 
+  function showSubstanceForm() {
+    const wrap = document.getElementById('substanceFormWrap');
+    if (!wrap) return;
+    wrap.innerHTML = `
+      <div class="card p-3 mb-3" style="background:#f8f9fa">
+        <div class="row g-2">
+          <div class="col-md-3">
+            <input class="form-control form-control-sm" id="sb_name" placeholder="물질명 *">
+          </div>
+          <div class="col-md-2">
+            <select class="form-select form-select-sm" id="sb_type">
+              <option value="SB">SB</option>
+              <option value="comparator">Comparator</option>
+              <option value="vehicle">Vehicle</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" id="sb_target" placeholder="Target">
+          </div>
+          <div class="col-md-3">
+            <input class="form-control form-control-sm" id="sb_moa" placeholder="MOA">
+          </div>
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" id="sb_note" placeholder="비고">
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-sm btn-primary" onclick="AdminView.saveSubstance()">저장</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('substanceFormWrap').innerHTML=''">취소</button>
+        </div>
+      </div>`;
+  }
+
+  async function saveSubstance() {
+    const name = document.getElementById('sb_name')?.value?.trim();
+    if (!name) return App.showToast('물질명을 입력해주세요.', 'error');
+    const data = {
+      substanceId: App.uuid(),
+      substanceName: name,
+      type: document.getElementById('sb_type')?.value || 'SB',
+      target: document.getElementById('sb_target')?.value?.trim() || '',
+      moa: document.getElementById('sb_moa')?.value?.trim() || '',
+      note: document.getElementById('sb_note')?.value?.trim() || ''
+    };
+    try {
+      await App.withLoading(() => api.saveSubstance(data), '저장 중...');
+      App.showToast('저장되었습니다.');
+      renderSubstances(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('저장 실패: ' + e.message, 'error'); }
+  }
+
+  async function deleteSubstance(id, name) {
+    if (!confirm(`"${name}" 물질을 삭제하시겠습니까?`)) return;
+    try {
+      await api.deleteSubstance(id);
+      App.showToast('삭제되었습니다.');
+      renderSubstances(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('삭제 실패: ' + e.message, 'error'); }
+  }
+
+  // ---- Competitors ----
+  async function renderCompetitors(c) {
+    let competitors = [];
+    try { competitors = await api.getCompetitors(); } catch (e) {}
+
+    c.innerHTML = `
+      <div class="card p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h6 class="fw-bold mb-0">경쟁사 약물 DB</h6>
+          <button class="btn btn-primary btn-sm" onclick="AdminView.showCompetitorForm()">+ 추가</button>
+        </div>
+        <div id="competitorFormWrap"></div>
+        <div class="table-responsive mt-2">
+          <table class="table table-sm table-bordered table-hover">
+            <thead><tr><th>회사명</th><th>물질명</th><th>적응증</th><th>출처</th><th>비고</th><th></th></tr></thead>
+            <tbody>
+              ${competitors.length ? competitors.map(c => `<tr>
+                <td class="fw-semibold">${c.companyName || ''}</td>
+                <td>${c.substanceName || ''}</td>
+                <td>${c.indication || ''}</td>
+                <td class="small">${c.source || ''}</td>
+                <td class="small text-muted">${c.note || ''}</td>
+                <td><button class="btn btn-xs btn-sm btn-outline-danger" onclick="AdminView.deleteCompetitor('${c.competitorId}','${(c.substanceName||'').replace(/'/g,'')}')">삭제</button></td>
+              </tr>`).join('') : '<tr><td colspan="6" class="text-center text-muted">등록된 경쟁사 데이터가 없습니다.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function showCompetitorForm() {
+    const wrap = document.getElementById('competitorFormWrap');
+    if (!wrap) return;
+    wrap.innerHTML = `
+      <div class="card p-3 mb-3" style="background:#f8f9fa">
+        <div class="row g-2">
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" id="cp_company" placeholder="회사명 *">
+          </div>
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" id="cp_substance" placeholder="물질명 *">
+          </div>
+          <div class="col-md-2">
+            <input class="form-control form-control-sm" id="cp_indication" placeholder="적응증">
+          </div>
+          <div class="col-md-3">
+            <input class="form-control form-control-sm" id="cp_source" placeholder="출처 (논문/학회)">
+          </div>
+          <div class="col-md-3">
+            <input class="form-control form-control-sm" id="cp_note" placeholder="비고">
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-sm btn-primary" onclick="AdminView.saveCompetitor()">저장</button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('competitorFormWrap').innerHTML=''">취소</button>
+        </div>
+      </div>`;
+  }
+
+  async function saveCompetitor() {
+    const company = document.getElementById('cp_company')?.value?.trim();
+    const substance = document.getElementById('cp_substance')?.value?.trim();
+    if (!company || !substance) return App.showToast('회사명과 물질명을 입력해주세요.', 'error');
+    const data = {
+      competitorId: App.uuid(),
+      companyName: company,
+      substanceName: substance,
+      indication: document.getElementById('cp_indication')?.value?.trim() || '',
+      source: document.getElementById('cp_source')?.value?.trim() || '',
+      note: document.getElementById('cp_note')?.value?.trim() || ''
+    };
+    try {
+      await App.withLoading(() => api.saveCompetitor(data), '저장 중...');
+      App.showToast('저장되었습니다.');
+      renderCompetitors(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('저장 실패: ' + e.message, 'error'); }
+  }
+
+  async function deleteCompetitor(id, name) {
+    if (!confirm(`"${name}" 경쟁사 데이터를 삭제하시겠습니까?`)) return;
+    try {
+      await api.deleteCompetitor(id);
+      App.showToast('삭제되었습니다.');
+      renderCompetitors(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('삭제 실패: ' + e.message, 'error'); }
+  }
+
+  // ---- Codes ----
+  const CODE_CATEGORIES = [
+    { key: 'CRO',     label: 'CRO 목록',   placeholder: 'Charles River' },
+    { key: 'strain',  label: 'Strain 목록', placeholder: 'BALB/c nude' },
+    { key: 'project', label: '과제 목록',   placeholder: '과제명' }
+  ];
+  let codeSubTab = 'CRO';
+
+  async function renderCodes(c) {
+    let allCodes = [];
+    try { allCodes = await api.getCodes(); } catch (e) {}
+
+    const subTabBtns = CODE_CATEGORIES.map(cat =>
+      `<button class="btn btn-sm ${codeSubTab === cat.key ? 'btn-dark' : 'btn-outline-dark'}"
+        onclick="AdminView.switchCodeTab('${cat.key}')">${cat.label}</button>`
+    ).join('');
+
+    const cat = CODE_CATEGORIES.find(c => c.key === codeSubTab) || CODE_CATEGORIES[0];
+    const filtered = allCodes.filter(cd => cd.codeType === codeSubTab);
+
+    c.innerHTML = `
+      <div class="card p-4">
+        <h6 class="fw-bold mb-3">공통 코드 관리</h6>
+        <div class="btn-group btn-group-sm mb-3">${subTabBtns}</div>
+        <div class="d-flex gap-2 mb-3">
+          <input class="form-control form-control-sm" id="newCodeValue" placeholder="${cat.placeholder}" style="max-width:280px">
+          <button class="btn btn-sm btn-primary" onclick="AdminView.addCode()">추가</button>
+        </div>
+        <table class="table table-sm table-bordered" style="max-width:480px">
+          <thead><tr><th>${cat.label}</th><th style="width:80px"></th></tr></thead>
+          <tbody>
+            ${filtered.length ? filtered.map(cd => `<tr>
+              <td>${cd.codeValue || cd.codeLabel || ''}</td>
+              <td><button class="btn btn-xs btn-sm btn-outline-danger" onclick="AdminView.deleteCode('${cd.codeType}','${(cd.codeValue||'').replace(/'/g,'')}')">삭제</button></td>
+            </tr>`).join('') : '<tr><td colspan="2" class="text-center text-muted">항목이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  function switchCodeTab(key) {
+    codeSubTab = key;
+    renderCodes(document.getElementById('adminContent'));
+  }
+
+  async function addCode() {
+    const val = document.getElementById('newCodeValue')?.value?.trim();
+    if (!val) return App.showToast('값을 입력해주세요.', 'error');
+    try {
+      await api.saveCode({ codeType: codeSubTab, codeValue: val, codeLabel: val, sortOrder: 0 });
+      App.showToast('추가되었습니다.');
+      renderCodes(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('추가 실패: ' + e.message, 'error'); }
+  }
+
+  async function deleteCode(codeType, codeValue) {
+    if (!confirm(`"${codeValue}" 항목을 삭제하시겠습니까?`)) return;
+    try {
+      await api.deleteCode(codeType, codeValue);
+      App.showToast('삭제되었습니다.');
+      renderCodes(document.getElementById('adminContent'));
+    } catch (e) { App.showToast('삭제 실패: ' + e.message, 'error'); }
+  }
+
+  // ---- Backup/Restore ----
   function renderBackup(c) {
     c.innerHTML = `
       <div class="card p-4">
@@ -129,60 +368,11 @@ const AdminView = (() => {
     reader.readAsText(file);
   }
 
-  async function renderCodes(c) {
-    let codes = [];
-    try { codes = await api.getCodes(); } catch (e) {}
-    const codeTypes = [...new Set(codes.map(c => c.codeType))];
-
-    c.innerHTML = `
-      <div class="card p-4">
-        <h6 class="fw-bold mb-3">공통 코드 관리 (CRO 목록 등)</h6>
-        <div class="row g-2 align-items-end mb-3">
-          <div class="col-md-3">
-            <input class="form-control form-control-sm" id="newCodeType" placeholder="코드 유형 (예: CRO)">
-          </div>
-          <div class="col-md-4">
-            <input class="form-control form-control-sm" id="newCodeValue" placeholder="값 (예: Charles River)">
-          </div>
-          <div class="col-md-3">
-            <input class="form-control form-control-sm" id="newCodeLabel" placeholder="표시명 (선택)">
-          </div>
-          <div class="col-md-2">
-            <button class="btn btn-primary btn-sm w-100" onclick="AdminView.addCode()">추가</button>
-          </div>
-        </div>
-        <table class="table table-sm table-bordered">
-          <thead><tr><th>유형</th><th>값</th><th>표시명</th><th></th></tr></thead>
-          <tbody>
-            ${codes.map(cd => `<tr>
-              <td>${cd.codeType}</td><td>${cd.codeValue}</td><td>${cd.codeLabel || ''}</td>
-              <td><button class="btn btn-xs btn-sm btn-outline-danger" onclick="AdminView.deleteCode('${cd.codeType}','${cd.codeValue}')">삭제</button></td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>`;
-  }
-
-  async function addCode() {
-    const codeType = document.getElementById('newCodeType')?.value?.trim();
-    const codeValue = document.getElementById('newCodeValue')?.value?.trim();
-    const codeLabel = document.getElementById('newCodeLabel')?.value?.trim();
-    if (!codeType || !codeValue) return App.showToast('유형과 값을 입력해주세요.', 'error');
-    try {
-      await api.saveCode({ codeType, codeValue, codeLabel: codeLabel || codeValue, sortOrder: 0 });
-      App.showToast('추가되었습니다.');
-      renderCodes(document.getElementById('adminContent'));
-    } catch (e) { App.showToast('추가 실패: ' + e.message, 'error'); }
-  }
-
-  async function deleteCode(codeType, codeValue) {
-    if (!confirm(`"${codeValue}" 코드를 삭제하시겠습니까?`)) return;
-    try {
-      await api.deleteCode(codeType, codeValue);
-      App.showToast('삭제되었습니다.');
-      renderCodes(document.getElementById('adminContent'));
-    } catch (e) { App.showToast('삭제 실패: ' + e.message, 'error'); }
-  }
-
-  return { render, switchTab, saveGasUrl, testConnection, exportAll, importAll, addCode, deleteCode };
+  return {
+    render, switchTab, saveGasUrl, testConnection,
+    showSubstanceForm, saveSubstance, deleteSubstance,
+    showCompetitorForm, saveCompetitor, deleteCompetitor,
+    switchCodeTab, addCode, deleteCode,
+    exportAll, importAll
+  };
 })();
