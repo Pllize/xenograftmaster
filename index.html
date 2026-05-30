@@ -1,703 +1,100 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pre-clinical Oncology Analysis Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
-    <style>
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .dashboard-header { background: #2c3e50; color: white; padding: 20px 0; border-radius: 0 0 15px 15px; margin-bottom: 30px; }
-        .card { border: none; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .table th { background-color: #e9ecef; white-space: nowrap; vertical-align: middle; }
-        .info-text { font-size: 0.85rem; color: #6c757d; }
-        
-        /* 엑셀 스타일 입력창 디자인 */
-        .excel-table td, .excel-table th { padding: 0; }
-        .excel-input { 
-            width: 100%; height: 100%; min-height: 38px; 
-            border: none; background: transparent; 
-            text-align: center; border-radius: 0; outline: none;
-        }
-        .excel-input:focus { background-color: #e8f0fe; box-shadow: inset 0 0 0 2px #0d6efd; }
-        
-        /* 동적 날짜 헤더 입력창 디자인 */
-        .day-header-input {
-            width: 40px; border: none; background: transparent; 
-            font-weight: bold; outline: none; text-align: center;
-            border-bottom: 1px dashed #aaa; margin-left: 2px;
-        }
-        .day-header-input:focus { border-bottom: 2px solid #0d6efd; background-color: #fff; }
-
-        /* 붙여넣기 영역 디자인 */
-        #pasteSection {
-            background-color: #f1f3f5; border-radius: 8px; padding: 15px; display: none; margin-bottom: 15px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XenograftMaster</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 
-<div class="dashboard-header text-center shadow-sm">
-    <h2>Pre-clinical In Vivo Efficacy Dashboard</h2>
-    <p class="mb-0">Fully Dynamic Spreadsheet & Scaled Efficacy Metrics</p>
+<!-- Navigation -->
+<nav class="navbar navbar-expand-md app-header sticky-top shadow-sm">
+  <div class="container-fluid px-4">
+    <a class="navbar-brand text-white" href="#/data">
+      🧬 XenograftMaster
+    </a>
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#navMenu">
+      <span class="navbar-toggler-icon" style="filter:invert(1)"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMenu">
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item">
+          <a class="nav-link" data-route="/data" href="#/data">데이터 관리</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-route="/compare" href="#/compare">비교</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-route="/import" href="#/import">CRO 변환</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-route="/admin" href="#/admin">관리</a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<!-- Unsaved changes banner (global) -->
+<div id="unsavedBanner" class="alert alert-warning d-flex align-items-center gap-2 mb-0 py-2 px-4" style="display:none!important;border-radius:0;">
+  <span>⚠ 저장되지 않은 변경사항이 있습니다.</span>
 </div>
 
-<div class="container-fluid px-4">
-    <div class="card p-4">
-        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-            <div>
-                <h5 class="fw-bold mb-1">Spreadsheet Data Entry</h5>
-                <p class="info-text mb-0">데이터를 복사하여 붙여넣거나, 수동으로 행/열을 추가하여 직접 입력하세요.</p>
-            </div>
-            <div class="d-flex gap-2">
-                <button class="btn btn-success fw-bold" onclick="togglePasteArea()">📋 엑셀/CSV 붙여넣기</button>
-                <button class="btn btn-outline-secondary fw-bold" onclick="addRow()">+ 개체(Row) 추가</button>
-                <button class="btn btn-outline-secondary fw-bold" onclick="addColumn()">+ 측정일(Column) 추가</button>
-                <button class="btn btn-primary fw-bold px-4" onclick="runAnalysis()">▶ 분석 실행</button>
-            </div>
-        </div>
+<!-- Main content -->
+<div id="mainContent"></div>
 
-        <div id="pasteSection">
-            <div class="d-flex justify-content-between align-items-end mb-2">
-                <label class="fw-bold">여기에 데이터를 붙여넣기(Ctrl+V) 하세요:</label>
-                <div>
-                    <span class="fw-bold me-2" style="font-size: 0.9rem;">데이터 형식 선택:</span>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="pasteFormat" id="pasteTsv" value="\t" checked>
-                        <label class="form-check-label text-secondary" for="pasteTsv">엑셀 (Tab 분리)</label>
-                    </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="radio" name="pasteFormat" id="pasteCsv" value=",">
-                        <label class="form-check-label text-secondary" for="pasteCsv">CSV (쉼표 분리)</label>
-                    </div>
-                </div>
-            </div>
-            <p class="info-text mb-2">* 첫 번째 행은 반드시 헤더(Subject_ID, Group, Day_0...)여야 합니다.</p>
-            <textarea id="pasteArea" class="form-control mb-3" rows="6" placeholder="복사한 데이터를 여기에 붙여넣어 주세요..."></textarea>
-            <div class="text-end">
-                <button class="btn btn-secondary btn-sm me-2" onclick="togglePasteArea()">취소</button>
-                <button class="btn btn-primary btn-sm fw-bold" onclick="parsePastedData()">테이블에 적용</button>
-            </div>
-        </div>
-        
-        <div class="table-responsive">
-            <table class="table table-bordered text-center align-middle excel-table" id="dataTable">
-                <thead id="dataHead">
-                    <tr>
-                        <th style="min-width: 100px; padding: 10px;">Subject_ID</th>
-                        <th style="min-width: 120px; padding: 10px;">Group</th>
-                    </tr>
-                </thead>
-                <tbody id="dataBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="card p-4" id="chartCard" style="display: none;">
-        <h5 class="fw-bold mb-4">In Vivo Efficacy Curves</h5>
-        <div class="row">
-            <div class="col-lg-6 mb-4 mb-lg-0">
-                <h6 class="text-center fw-bold text-secondary">Average Tumor Volume (Absolute)</h6>
-                <div style="height: 350px; width: 100%;">
-                    <canvas id="tumorChart"></canvas>
-                </div>
-            </div>
-            <div class="col-lg-6">
-                <h6 class="text-center fw-bold text-secondary">Scaled Average Change (%)</h6>
-                <div style="height: 350px; width: 100%;">
-                    <canvas id="scaledChart"></canvas>
-                </div>
-                <p class="text-center mt-2" style="font-size: 0.75rem; color: #aaa;">* 100%: Max Average Change / -100%: Complete Regression</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="card p-4" id="tableCard" style="display: none;">
-        <h5 class="fw-bold mb-3">Efficacy Summary Table</h5>
-        <div class="table-responsive">
-            <table class="table table-hover table-bordered text-center align-middle" id="summaryTable">
-                <thead>
-                    <tr>
-                        <th>Group</th>
-                        <th>N</th>
-                        <th title="Objective Response Rate (CR + PR %)">ORR (%)</th>
-                        <th title="Time to Response (Average days to PR/CR)">TTR (Days)</th>
-                        <th title="Duration of Response (Median days)">mDOR (Days)</th>
-                        <th title="Event-Free Survival 2x Baseline (Median days)">mEFS2 (Days)</th>
-                        <th title="Event-Free Survival 4x Baseline (Median days)">mEFS4 (Days)</th>
-                        <th title="Normalized AUC Ratio vs Control">Norm AUC Ratio</th>
-                        <th title="Tumor Growth Inhibition vs Control">TGI D21 (%)</th>
-                        <th title="Tumor Growth Inhibition vs Control">TGI D42 (%)</th>
-                    </tr>
-                </thead>
-                <tbody id="tableBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="card p-4" id="statsCard" style="display: none;">
-        <h5 class="fw-bold mb-3">Timepoint Statistical Analysis (Welch's t-test)</h5>
-        
-        <div class="row mb-4">
-            <div class="col-md-5">
-                <label class="form-label fw-bold">Group A</label>
-                <select id="group1Select" class="form-select"></select>
-            </div>
-            <div class="col-md-5">
-                <label class="form-label fw-bold">Group B</label>
-                <select id="group2Select" class="form-select"></select>
-            </div>
-            <div class="col-md-2 d-flex align-items-end">
-                <button class="btn btn-dark w-100 fw-bold" onclick="runStats()">Compare</button>
-            </div>
-        </div>
-
-        <div class="table-responsive" id="statsTableContainer" style="display: none;">
-            <table class="table table-hover table-bordered text-center align-middle">
-                <thead>
-                    <tr>
-                        <th>Timepoint (Day)</th>
-                        <th id="thGrp1">Group A Mean ± SEM</th>
-                        <th id="thGrp2">Group B Mean ± SEM</th>
-                        <th>p-value</th>
-                        <th>Significance</th>
-                    </tr>
-                </thead>
-                <tbody id="statsTableBody"></tbody>
-            </table>
-            <ul class="info-text mt-2 list-unstyled">
-                <li>* <strong>ns</strong>: not significant (p &ge; 0.05) &nbsp;|&nbsp; <strong>*</strong>: p < 0.05 &nbsp;|&nbsp; <strong>**</strong>: p < 0.01 &nbsp;|&nbsp; <strong>***</strong>: p < 0.001</li>
-            </ul>
-        </div>
-    </div>
+<!-- Loading overlay -->
+<div id="loadingOverlay">
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <div id="loadingMsg" class="text-secondary fw-bold">불러오는 중...</div>
+  </div>
 </div>
+
+<!-- Toast container -->
+<div id="toastContainer"></div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<!-- Chart.js Error Bars plugin (for SEM/SD) -->
+<script src="https://cdn.jsdelivr.net/npm/chartjs-chart-error-bars@4/build/index.umd.min.js"></script>
+
+<!-- jStat for statistics -->
+<script src="https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js"></script>
+
+<!-- App modules -->
+<script src="js/api.js"></script>
+<script src="js/router.js"></script>
+<script src="js/app.js"></script>
+<script src="js/utils/analysis.js"></script>
+<script src="js/utils/csvParser.js"></script>
+<script src="js/views/studyList.js"></script>
+<script src="js/views/studyForm.js"></script>
+<script src="js/views/studyDetail.js"></script>
+<script src="js/views/comparison.js"></script>
+<script src="js/views/csvImport.js"></script>
+<script src="js/views/adminView.js"></script>
 
 <script>
-    let tumorChartInstance = null;
-    let scaledChartInstance = null;
-    window.globalGroups = null;
-    window.globalDays = null;
-
-    window.onload = () => {
-        addColumn(); addRow();
-    };
-
-    // --- 1. 엑셀/CSV 붙여넣기 파싱 로직 ---
-    function togglePasteArea() {
-        let section = document.getElementById('pasteSection');
-        section.style.display = (section.style.display === 'none' || section.style.display === '') ? 'block' : 'none';
-    }
-
-    function parsePastedData() {
-        let text = document.getElementById('pasteArea').value.trim();
-        if(!text) return alert("데이터를 붙여넣어 주세요.");
-        
-        let lines = text.split(/\r\n|\n|\r/).filter(line => line.trim() !== '');
-        if(lines.length < 2) return alert("헤더(첫 줄)와 최소 1개 이상의 데이터 행이 필요합니다.");
-
-        // 라디오 버튼 값 가져오기 (Excel/TSV = '\t', CSV = ',')
-        let delimiter = document.querySelector('input[name="pasteFormat"]:checked').value;
-        
-        // CSV 등의 불필요한 따옴표 제거 유틸
-        const cleanCell = (cell) => cell.trim().replace(/^"|"$/g, '');
-        let headers = lines[0].split(delimiter).map(cleanCell);
-        
-        // 1. 헤더 재생성
-        let theadTr = document.querySelector('#dataHead tr');
-        theadTr.innerHTML = `
-            <th style="min-width: 100px; padding: 10px;">Subject_ID</th>
-            <th style="min-width: 120px; padding: 10px;">Group</th>
-        `;
-        
-        let dayIndices = [];
-        headers.forEach((h, idx) => {
-            let hLower = h.toLowerCase();
-            if(hLower.startsWith('day') || (!isNaN(h) && h !== '')) {
-                let match = h.match(/\d+/);
-                let dayNum = match ? match[0] : (isNaN(h) ? '' : h);
-                dayIndices.push({ index: idx, day: dayNum });
-                
-                let th = document.createElement('th');
-                th.style.minWidth = "100px";
-                th.style.padding = "0";
-                th.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-                                    Day_ <input type="number" class="day-header-input" value="${dayNum}">
-                                </div>`;
-                theadTr.appendChild(th);
-            }
-        });
-
-        // 2. 바디(데이터) 재생성
-        let tbody = document.getElementById('dataBody');
-        tbody.innerHTML = '';
-        
-        let idIdx = headers.findIndex(h => h.toLowerCase().includes('subject') || h.toLowerCase().includes('id'));
-        let grpIdx = headers.findIndex(h => h.toLowerCase().includes('group'));
-        
-        if (idIdx === -1) idIdx = 0; 
-        if (grpIdx === -1) grpIdx = 1;
-
-        for (let i = 1; i < lines.length; i++) {
-            let cells = lines[i].split(delimiter).map(cleanCell);
-            let tr = document.createElement('tr');
-            
-            let tdSubj = document.createElement('td');
-            tdSubj.innerHTML = `<input type="text" class="excel-input" value="${cells[idIdx] || ''}" placeholder="ID">`;
-            tr.appendChild(tdSubj);
-
-            let tdGrp = document.createElement('td');
-            tdGrp.innerHTML = `<input type="text" class="excel-input" value="${cells[grpIdx] || ''}" placeholder="Group">`;
-            tr.appendChild(tdGrp);
-
-            dayIndices.forEach(di => {
-                let val = cells[di.index] || '';
-                let tdVol = document.createElement('td');
-                tdVol.innerHTML = `<input type="number" step="any" class="excel-input" value="${val}" placeholder="...">`;
-                tr.appendChild(tdVol);
-            });
-            
-            tbody.appendChild(tr);
-        }
-        
-        document.getElementById('pasteArea').value = '';
-        togglePasteArea();
-        alert("데이터가 성공적으로 적용되었습니다. [▶ 분석 실행] 버튼을 눌러주세요.");
-    }
-
-    // --- 2. 수동 테이블 조작 로직 ---
-    function addColumn() {
-        let headRow = document.querySelector('#dataHead tr');
-        let th = document.createElement('th');
-        th.style.minWidth = "100px";
-        th.style.padding = "0";
-        th.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; padding: 5px;">
-                            Day_ <input type="number" class="day-header-input" placeholder="0">
-                        </div>`;
-        headRow.appendChild(th);
-
-        let rows = document.querySelectorAll('#dataBody tr');
-        rows.forEach(tr => {
-            let td = document.createElement('td');
-            td.innerHTML = `<input type="number" step="any" class="excel-input" placeholder="...">`;
-            tr.appendChild(td);
-        });
-    }
-
-    function addRow() {
-        let tbody = document.getElementById('dataBody');
-        let tr = document.createElement('tr');
-        
-        let tdSubj = document.createElement('td');
-        tdSubj.innerHTML = `<input type="text" class="excel-input" placeholder="ID">`;
-        tr.appendChild(tdSubj);
-
-        let tdGrp = document.createElement('td');
-        tdGrp.innerHTML = `<input type="text" class="excel-input" placeholder="Group">`;
-        tr.appendChild(tdGrp);
-
-        let dayColsCount = document.querySelectorAll('#dataHead th').length - 2; 
-        for (let i = 0; i < dayColsCount; i++) {
-            let tdVol = document.createElement('td');
-            tdVol.innerHTML = `<input type="number" step="any" class="excel-input" placeholder="...">`;
-            tr.appendChild(tdVol);
-        }
-        tbody.appendChild(tr);
-    }
-
-    // --- 3. 데이터 파싱 및 분석 ---
-    function runAnalysis() {
-        let data = [];
-        let table = document.getElementById('dataTable');
-        let headers = ['Subject_ID', 'Group'];
-        let dayInputs = table.querySelectorAll('.day-header-input');
-        let hasError = false;
-        
-        dayInputs.forEach(input => {
-            let dayVal = input.value.trim();
-            if(dayVal === '') hasError = true;
-            headers.push(`Day_${dayVal}`);
-        });
-        
-        if (hasError) return alert("테이블 상단의 측정일(Day) 숫자를 모두 채워주세요.");
-
-        let uniqueDays = new Set(headers);
-        if (uniqueDays.size !== headers.length) return alert("동일한 측정일(Day)이 2개 이상 있습니다.");
-
-        let rows = table.querySelectorAll('tbody tr');
-        rows.forEach(row => {
-            let rowData = {};
-            let inputs = row.querySelectorAll('td input.excel-input');
-            let hasData = false;
-
-            inputs.forEach((input, index) => {
-                let val = input.value.trim();
-                let header = headers[index];
-                
-                if (header.startsWith('Day_')) {
-                    if (val !== "") { rowData[header] = parseFloat(val); hasData = true; }
-                } else { rowData[header] = val; }
-            });
-            
-            if (rowData['Group'] && rowData['Group'] !== "" && hasData) {
-                if(!rowData['Subject_ID']) rowData['Subject_ID'] = "Unnamed";
-                data.push(rowData);
-            }
-        });
-
-        if (data.length === 0) return alert("유효한 데이터가 없습니다.");
-        processData(data);
-    }
-
-    function processData(data) {
-        let headers = Object.keys(data[0]);
-        let days = [];
-        headers.forEach(h => {
-            if (h.startsWith('Day_')) days.push(parseInt(h.split('_')[1]));
-        });
-        days.sort((a, b) => a - b);
-
-        let groups = {};
-        data.forEach(row => {
-            let grpName = row['Group'];
-            if (!groups[grpName]) groups[grpName] = [];
-            
-            let vols = {};
-            days.forEach(d => {
-                let key = `Day_${d}`;
-                let v = row[key];
-                if (v !== undefined && v !== null && v !== '') vols[d] = parseFloat(v);
-            });
-            groups[grpName].push({ id: row['Subject_ID'], vols: vols });
-        });
-
-        window.globalGroups = groups;
-        window.globalDays = days;
-
-        let groupNames = Object.keys(groups);
-        let controlGrp = groupNames.find(g => g.toLowerCase().includes('control') || g.toLowerCase().includes('vehicle')) || groupNames[0];
-
-        renderCharts(groups, days);
-        calculateMetrics(groups, controlGrp, days);
-        populateDropdowns(groupNames, controlGrp);
-    }
-
-    // --- 4. 통계 및 지표 산출 로직 ---
-    const getMean = (arr) => arr.length ? jStat.mean(arr) : null;
-    const getMedian = (arr) => arr.length ? jStat.median(arr) : null;
-    const getSEM = (arr) => arr.length > 1 ? jStat.stdev(arr, true) / Math.sqrt(arr.length) : 0;
-    const getNearestDay = (target, days) => days.reduce((prev, curr) => Math.abs(curr - target) < Math.abs(prev - target) ? curr : prev);
-
-    function calculateMetrics(groups, controlGrp, days) {
-        let tableBody = document.getElementById('tableBody');
-        tableBody.innerHTML = '';
-
-        let controlData = groups[controlGrp];
-        let day21 = getNearestDay(21, days);
-        let day42 = getNearestDay(42, days);
-        
-        let ctrlVol21 = getMean(controlData.map(s => s.vols[day21]).filter(v => v !== undefined));
-        let ctrlVol42 = getMean(controlData.map(s => s.vols[day42]).filter(v => v !== undefined));
-
-        let controlNormAUCs = controlData.map(s => calcSubjectNormAUC(s, days)).filter(v => v !== null);
-        let meanCtrlNormAUC = getMean(controlNormAUCs);
-
-        Object.keys(groups).forEach(grp => {
-            let subjects = groups[grp];
-            let N = subjects.length;
-
-            let responses = [], ttrs = [], dors = [], efs2s = [], efs4s = [], normAUCs = [];
-            let grpVol21 = getMean(subjects.map(s => s.vols[day21]).filter(v => v !== undefined));
-            let grpVol42 = getMean(subjects.map(s => s.vols[day42]).filter(v => v !== undefined));
-
-            let tgi21 = (grp === controlGrp) ? "0.00" : (ctrlVol21 && grpVol21 ? ((1 - (grpVol21 / ctrlVol21)) * 100).toFixed(2) : "N/A");
-            let tgi42 = (grp === controlGrp) ? "0.00" : (ctrlVol42 && grpVol42 ? ((1 - (grpVol42 / ctrlVol42)) * 100).toFixed(2) : "N/A");
-
-            subjects.forEach(sub => {
-                let nAuc = calcSubjectNormAUC(sub, days);
-                if (nAuc !== null) normAUCs.push(nAuc);
-
-                let v0 = sub.vols[days[0]]; 
-                let availableDays = Object.keys(sub.vols).map(Number).sort((a,b)=>a-b);
-                let lastDay = availableDays[availableDays.length - 1];
-
-                if (v0 === undefined) return;
-
-                let nadir = v0, ttr = null, isCR = false, isPR = false;
-                let efs2Day = lastDay, efs4Day = lastDay, efs2Met = false, efs4Met = false;
-
-                for (let d of availableDays) {
-                    let v = sub.vols[d];
-                    if (!efs2Met && v >= v0 * 2) { efs2Day = d; efs2Met = true; }
-                    if (!efs4Met && v >= v0 * 4) { efs4Day = d; efs4Met = true; }
-
-                    if (d === days[0]) continue;
-                    if (v < nadir) nadir = v;
-
-                    let reduction = (v - v0) / v0;
-                    if (reduction <= -1.0) { if (ttr === null) ttr = d; isCR = true; } 
-                    else if (reduction <= -0.3) { if (ttr === null) ttr = d; isPR = true; }
-                }
-
-                efs2s.push(efs2Day); efs4s.push(efs4Day);
-                if (isCR) responses.push('CR'); else if (isPR) responses.push('PR'); else responses.push('None');
-
-                if (ttr !== null) {
-                    ttrs.push(ttr);
-                    let progDay = lastDay, localNadir = sub.vols[ttr];
-                    for (let d of availableDays.filter(day => day >= ttr)) {
-                        let v = sub.vols[d];
-                        if (v < localNadir) localNadir = v;
-                        if (v >= localNadir * 1.2) { progDay = d; break; }
-                    }
-                    dors.push(progDay - ttr);
-                }
-            });
-
-            let crCount = responses.filter(r => r === 'CR').length;
-            let prCount = responses.filter(r => r === 'PR').length;
-            let orr = ((crCount + prCount) / N) * 100;
-
-            let meanTTR = getMean(ttrs);
-            let medianDOR = getMedian(dors);
-            let medianEFS2 = getMedian(efs2s);
-            let medianEFS4 = getMedian(efs4s);
-            
-            let meanNormAUC = getMean(normAUCs);
-            let aucRatio = (grp === controlGrp) ? "1.00" : (meanCtrlNormAUC && meanNormAUC ? (meanNormAUC / meanCtrlNormAUC).toFixed(2) : "N/A");
-
-            let tr = document.createElement('tr');
-            if(grp === controlGrp) tr.classList.add('table-secondary');
-            
-            tr.innerHTML = `
-                <td class="fw-bold">${grp} ${grp === controlGrp ? '<span class="badge bg-secondary">Control</span>' : ''}</td>
-                <td>${N}</td>
-                <td>${isNaN(orr) ? 'N/A' : orr.toFixed(1)}</td>
-                <td>${meanTTR !== null ? meanTTR.toFixed(1) : 'N/A'}</td>
-                <td>${medianDOR !== null ? medianDOR.toFixed(1) : 'N/A'}</td>
-                <td>${medianEFS2 !== null ? medianEFS2.toFixed(1) : 'N/A'}</td>
-                <td>${medianEFS4 !== null ? medianEFS4.toFixed(1) : 'N/A'}</td>
-                <td>${aucRatio}</td>
-                <td>${tgi21 === "N/A" ? "N/A" : tgi21}</td>
-                <td>${tgi42 === "N/A" ? "N/A" : tgi42}</td>
-            `;
-            tableBody.appendChild(tr);
-        });
-
-        document.getElementById('tableCard').style.display = 'block';
-    }
-
-    function calcSubjectNormAUC(subject, days) {
-        let auc = 0, firstDay = null, prevDay = null, lastDay = null;
-        days.forEach(d => {
-            let v = subject.vols[d];
-            if (v !== undefined) {
-                if (firstDay === null) firstDay = d;
-                if (prevDay !== null) auc += ((subject.vols[prevDay] + v) / 2) * (d - prevDay);
-                prevDay = d; lastDay = d;
-            }
-        });
-        let totalDays = lastDay - firstDay;
-        return (totalDays > 0) ? (auc / totalDays) : null;
-    }
-
-    // --- 5. 듀얼 차트 렌더링 (Absolute + Scaled Average Change) ---
-    function renderCharts(groups, days) {
-        if (tumorChartInstance) tumorChartInstance.destroy();
-        if (scaledChartInstance) scaledChartInstance.destroy();
-
-        const colors = ['#0d6efd', '#dc3545', '#198754', '#ffc107', '#0dcaf0', '#6f42c1', '#d63384', '#fd7e14'];
-        
-        let absDatasets = [];
-        let scaledDatasets = [];
-        let colorIdx = 0;
-
-        // 1단계: 각 그룹별 시점의 평균(Mean) 계산 및 전체 최대 변화량(Max Average Change) 도출
-        let means = {};
-        let globalMaxChange = 0;
-        
-        Object.keys(groups).forEach(grp => {
-            means[grp] = {};
-            days.forEach(d => {
-                let vals = groups[grp].map(s => s.vols[d]).filter(v => v !== undefined);
-                let m = getMean(vals);
-                means[grp][d] = m;
-                
-                // Baseline(Day 0) 대비 증가폭 계산
-                if (d !== days[0] && m !== null && means[grp][days[0]] !== null) {
-                    let change = m - means[grp][days[0]];
-                    if (change > globalMaxChange) {
-                        globalMaxChange = change;
-                    }
-                }
-            });
-        });
-
-        // 0으로 나누기 방지용 폴백
-        if (globalMaxChange === 0) globalMaxChange = 1; 
-
-        // 2단계: 데이터셋 생성
-        Object.keys(groups).forEach(grp => {
-            let absDataPoints = [];
-            let scaledDataPoints = [];
-
-            days.forEach(d => {
-                let m = means[grp][d];
-                absDataPoints.push(m); // 절대 종양 부피
-
-                // Scaled Average Change 계산 로직 (PMID: 38641411 기준)
-                let baseline = means[grp][days[0]];
-                if (m === null || baseline === null) {
-                    scaledDataPoints.push(null);
-                } else {
-                    let change = m - baseline;
-                    if (change >= 0) {
-                        // 성장 시: 최대 성장량 대비 퍼센테이지
-                        scaledDataPoints.push((change / globalMaxChange) * 100);
-                    } else {
-                        // 감소 시: 초기 종양 부피 대비 퍼센테이지 (종양 0일때 -100%)
-                        scaledDataPoints.push(baseline > 0 ? (change / baseline) * 100 : 0);
-                    }
-                }
-            });
-
-            let sharedOptions = {
-                label: grp,
-                borderColor: colors[colorIdx % colors.length],
-                backgroundColor: colors[colorIdx % colors.length],
-                fill: false,
-                tension: 0.2,
-                pointRadius: 4,
-                pointHoverRadius: 6
-            };
-
-            absDatasets.push({ ...sharedOptions, data: absDataPoints });
-            scaledDatasets.push({ ...sharedOptions, data: scaledDataPoints });
-            
-            colorIdx++;
-        });
-
-        // 차트 1: 절대 종양 크기 곡선
-        const ctx1 = document.getElementById('tumorChart').getContext('2d');
-        tumorChartInstance = new Chart(ctx1, {
-            type: 'line',
-            data: { labels: days.map(d => `Day ${d}`), datasets: absDatasets },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { position: 'top' } },
-                scales: {
-                    x: { title: { display: true, text: 'Days' } },
-                    y: { title: { display: true, text: 'Tumor Volume (mm³)' }, beginAtZero: true }
-                }
-            }
-        });
-
-        // 차트 2: Scaled Average Change 곡선
-        const ctx2 = document.getElementById('scaledChart').getContext('2d');
-        scaledChartInstance = new Chart(ctx2, {
-            type: 'line',
-            data: { labels: days.map(d => `Day ${d}`), datasets: scaledDatasets },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: { 
-                    legend: { position: 'top' },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + '%';
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: { title: { display: true, text: 'Days' } },
-                    y: { 
-                        title: { display: true, text: 'Scaled Change (%)' },
-                        suggestedMax: 100,
-                        suggestedMin: -100,
-                        grid: { color: (context) => context.tick.value === 0 ? '#333' : 'rgba(0,0,0,0.1)' } // 0% 기준선 강조
-                    }
-                }
-            }
-        });
-
-        document.getElementById('chartCard').style.display = 'block';
-    }
-
-    // --- 6. 통계 UI 및 검정(Welch's t-test) ---
-    function populateDropdowns(groupNames, controlGrp) {
-        let sel1 = document.getElementById('group1Select');
-        let sel2 = document.getElementById('group2Select');
-        sel1.innerHTML = ''; sel2.innerHTML = '';
-
-        groupNames.forEach(grp => {
-            sel1.add(new Option(grp, grp));
-            sel2.add(new Option(grp, grp));
-        });
-
-        sel1.value = controlGrp;
-        if(groupNames.length > 1) sel2.value = groupNames.find(g => g !== controlGrp);
-        document.getElementById('statsCard').style.display = 'block';
-    }
-
-    function runStats() {
-        let grp1 = document.getElementById('group1Select').value;
-        let grp2 = document.getElementById('group2Select').value;
-        
-        if(grp1 === grp2) return alert("서로 다른 그룹을 선택해 주세요.");
-
-        document.getElementById('thGrp1').innerText = `${grp1} (Mean ± SEM)`;
-        document.getElementById('thGrp2').innerText = `${grp2} (Mean ± SEM)`;
-
-        let tbody = document.getElementById('statsTableBody');
-        tbody.innerHTML = '';
-
-        window.globalDays.forEach(d => {
-            let vals1 = window.globalGroups[grp1].map(s => s.vols[d]).filter(v => v !== undefined);
-            let vals2 = window.globalGroups[grp2].map(s => s.vols[d]).filter(v => v !== undefined);
-
-            let m1 = vals1.length ? jStat.mean(vals1) : null;
-            let m2 = vals2.length ? jStat.mean(vals2) : null;
-            let sem1 = vals1.length ? getSEM(vals1) : null;
-            let sem2 = vals2.length ? getSEM(vals2) : null;
-
-            let m1Str = m1 !== null ? `${m1.toFixed(1)} ± ${sem1.toFixed(1)}` : 'N/A';
-            let m2Str = m2 !== null ? `${m2.toFixed(1)} ± ${sem2.toFixed(1)}` : 'N/A';
-
-            let pValueStr = "N/A", sigStr = "-";
-
-            if(vals1.length >= 2 && vals2.length >= 2) {
-                let v1 = jStat.variance(vals1, true), v2 = jStat.variance(vals2, true);
-                let n1 = vals1.length, n2 = vals2.length;
-
-                if(v1 === 0 && v2 === 0 && m1 === m2) {
-                    pValueStr = "1.0000"; sigStr = "ns";
-                } else if(v1 === 0 && v2 === 0) {
-                    pValueStr = "< 0.0001"; sigStr = "***";
-                } else {
-                    let tStat = Math.abs(m1 - m2) / Math.sqrt((v1/n1) + (v2/n2));
-                    let df = Math.pow((v1/n1) + (v2/n2), 2) / (Math.pow(v1/n1, 2)/(n1-1) + Math.pow(v2/n2, 2)/(n2-1));
-                    let pVal = 2 * (1 - jStat.studentt.cdf(tStat, df));
-                    
-                    pValueStr = pVal < 0.0001 ? "< 0.0001" : pVal.toFixed(4);
-                    sigStr = pVal < 0.001 ? "***" : (pVal < 0.01 ? "**" : (pVal < 0.05 ? "*" : "ns"));
-                }
-            }
-
-            let tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="fw-bold">Day ${d}</td>
-                <td>${m1Str}</td>
-                <td>${m2Str}</td>
-                <td>${pValueStr}</td>
-                <td class="fw-bold ${sigStr !== 'ns' && sigStr !== '-' ? 'text-danger' : 'text-secondary'}">${sigStr}</td>
-            `;
-            tbody.appendChild(tr);
-        });
-
-        document.getElementById('statsTableContainer').style.display = 'block';
-    }
+  // Register routes
+  Router.register('/data', () => StudyListView.render());
+  Router.register('/study/new', (p) => StudyFormView.render({ id: 'new' }));
+  Router.register('/study/:id', (p) => StudyDetailView.render(p));
+  Router.register('/study/:id/edit', (p) => StudyFormView.render(p));
+  Router.register('/compare', () => ComparisonView.render());
+  Router.register('/import', () => CSVImportView.render());
+  Router.register('/admin', () => AdminView.render());
+
+  // Make api accessible globally (used in views)
+  window.api = api;
+  window.analysisState = {};
 </script>
+
 </body>
 </html>
