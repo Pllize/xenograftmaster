@@ -286,13 +286,20 @@ function exportAll() {
 function doGet(e) {
   try {
     const p = e.parameter;
+
+    // Handle POST-via-GET (payload param) to avoid CORS preflight
+    if (p.payload) {
+      const body = JSON.parse(decodeURIComponent(p.payload));
+      return handlePost(body.action, body.data);
+    }
+
     let result;
     switch (p.action) {
-      case 'init':        result = initSheets(); break;
-      case 'getStudies':  result = getStudies(p); break;
+      case 'init':         result = initSheets(); break;
+      case 'getStudies':   result = getStudies(p); break;
       case 'getStudyData': result = getStudyData(p.studyId); break;
-      case 'getCodes':    result = getCodes(p.codeType); break;
-      case 'exportAll':   result = exportAll(); break;
+      case 'getCodes':     result = getCodes(p.codeType); break;
+      case 'exportAll':    result = exportAll(); break;
       default: result = { error: 'Unknown action: ' + p.action };
     }
     return jsonResponse(result);
@@ -301,25 +308,28 @@ function doGet(e) {
   }
 }
 
+function handlePost(action, data) {
+  let result;
+  switch (action) {
+    case 'saveStudy':            result = saveStudy(data); break;
+    case 'deleteStudy':          result = deleteStudy(data.studyId); break;
+    case 'saveGroups':           result = saveGroups(data.studyId, data.groups); break;
+    case 'deleteGroup':          result = deleteGroup(data.groupId); break;
+    case 'saveAnimals':          result = saveAnimals(data.studyId, data.animals); break;
+    case 'bulkSaveMeasurements': result = bulkSaveMeasurements(data.studyId, data.measurements); break;
+    case 'bulkSaveNecropsy':     result = bulkSaveNecropsy(data.studyId, data.records); break;
+    case 'saveCode':             result = saveCode(data); break;
+    case 'deleteCode':           result = deleteCode(data.codeType, data.codeValue); break;
+    case 'importAll':            result = importAll(data); break;
+    default: result = { error: 'Unknown action: ' + action };
+  }
+  return jsonResponse(result);
+}
+
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
-    const { action, data } = body;
-    let result;
-    switch (action) {
-      case 'saveStudy':             result = saveStudy(data); break;
-      case 'deleteStudy':           result = deleteStudy(data.studyId); break;
-      case 'saveGroups':            result = saveGroups(data.studyId, data.groups); break;
-      case 'deleteGroup':           result = deleteGroup(data.groupId); break;
-      case 'saveAnimals':           result = saveAnimals(data.studyId, data.animals); break;
-      case 'bulkSaveMeasurements':  result = bulkSaveMeasurements(data.studyId, data.measurements); break;
-      case 'bulkSaveNecropsy':      result = bulkSaveNecropsy(data.studyId, data.records); break;
-      case 'saveCode':              result = saveCode(data); break;
-      case 'deleteCode':            result = deleteCode(data.codeType, data.codeValue); break;
-      case 'importAll':             result = importAll(data); break;
-      default: result = { error: 'Unknown action: ' + action };
-    }
-    return jsonResponse(result);
+    return handlePost(body.action, body.data);
   } catch(err) {
     return jsonResponse({ error: err.message, stack: err.stack });
   }

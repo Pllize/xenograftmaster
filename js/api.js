@@ -11,19 +11,17 @@ const api = (() => {
   async function get(params) {
     const url = getUrl();
     const qs = new URLSearchParams(params).toString();
-    const resp = await fetch(`${url}?${qs}`);
+    const resp = await fetch(`${url}?${qs}`, { redirect: 'follow' });
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
     return json;
   }
 
+  // Apps Script POST via GET with payload param (avoids CORS preflight)
   async function post(action, data) {
     const url = getUrl();
-    const resp = await fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ action, data }),
-      headers: { 'Content-Type': 'text/plain' } // Apps Script requires text/plain for CORS
-    });
+    const payload = encodeURIComponent(JSON.stringify({ action, data }));
+    const resp = await fetch(`${url}?payload=${payload}`, { redirect: 'follow' });
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
     return json;
