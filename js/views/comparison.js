@@ -4,9 +4,15 @@ const ComparisonView = (() => {
   let selected = new Set();
   let studyDataMap = {};
   let compareCharts = {};
+  let modelCodes = [];
 
   async function render() {
     App.setActiveNav('/compare');
+    try {
+      const codes = await api.getCodes('modelName');
+      modelCodes = (codes || []).map(c => c.codeValue);
+    } catch(e) { modelCodes = []; }
+
     App.renderContent(`
       <h4 class="fw-bold mb-3">시험 비교</h4>
       <div class="card p-3 mb-3">
@@ -18,11 +24,15 @@ const ComparisonView = (() => {
             </select>
           </div>
           <div class="col-md-3">
-            <input class="form-control form-control-sm" id="c_model" placeholder="모델명 검색" oninput="ComparisonView.loadStudies()">
+            <input class="form-control form-control-sm" id="c_model" placeholder="모델명 검색"
+              list="dl_cmp_model" oninput="ComparisonView.loadStudies()">
+            <datalist id="dl_cmp_model">${modelCodes.map(v => `<option value="${v}">`).join('')}</datalist>
           </div>
           <div class="col-md-3">
             <select class="form-select form-select-sm" id="c_source" onchange="ComparisonView.loadStudies()">
-              <option value="">출처 전체</option><option value="자체">자체</option><option value="경쟁사">경쟁사</option>
+              <option value="">출처 전체</option>
+              <option value="SB">SB</option>
+              <option value="경쟁사">경쟁사</option>
             </select>
           </div>
           <div class="col-md-3 d-flex align-items-end">
@@ -54,6 +64,10 @@ const ComparisonView = (() => {
   function renderCheckboxes() {
     const container = document.getElementById('studyCheckboxes');
     if (!container) return;
+    if (!studies.length) {
+      container.innerHTML = '<p class="text-muted small mb-0">조건에 맞는 시험이 없습니다.</p>';
+      return;
+    }
     container.innerHTML = studies.map(s => `
       <div class="form-check form-check-inline">
         <input class="form-check-input" type="checkbox" id="cs_${s.studyId}" value="${s.studyId}"
@@ -122,10 +136,11 @@ const ComparisonView = (() => {
         colorIdx++;
 
         const m = metrics[grp];
+        const isSB = data.study.dataSource === 'SB' || data.study.dataSource === '자체';
         tableRows.push(`<tr>
           <td>${studyLabel}</td>
           <td>${data.study.modelName || '-'}</td>
-          <td>${data.study.dataSource === '경쟁사' ? `<span class="badge bg-warning text-dark">경쟁사</span> ${data.study.competitorDrug || ''}` : '자체'}</td>
+          <td>${!isSB ? `<span class="badge bg-warning text-dark">경쟁사</span> ${data.study.competitorDrug || ''}` : '<span class="badge bg-primary">SB</span>'}</td>
           <td>${grp} ${isCtrl ? '<span class="badge bg-secondary">ctrl</span>' : ''}</td>
           <td>${m.N}</td>
           <td>${m.tgi21_TC != null ? m.tgi21_TC.toFixed(1) : '-'}</td>

@@ -15,8 +15,7 @@ const StudyDetailView = (() => {
     controlGroup: null,
     statMethod: 'welch',
     crThreshold: 0,
-    yMin: '',
-    yMax: ''
+    yScales: { abs: { min: '', max: '' }, scaled: { min: '', max: '' }, bw: { min: '', max: '' }, necropsy: { min: '', max: '' } }
   };
 
   let charts = {};
@@ -209,7 +208,7 @@ const StudyDetailView = (() => {
             <button class="btn ${obsTab==='necropsy' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.switchObsTab('necropsy')">Necropsy</button>
           </div>
           <div class="d-flex gap-2">
-            <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.pasteData()">📋 붙여넣기</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.openPasteModal()">📋 붙여넣기</button>
             <button class="btn btn-sm btn-primary fw-bold" onclick="StudyDetailView.saveData()">💾 저장</button>
           </div>
         </div>
@@ -265,7 +264,7 @@ const StudyDetailView = (() => {
             const val = type === 'tv'
               ? (localMeasurements[a.animalId]?.[d]?.tv ?? '')
               : (localMeasurements[a.animalId]?.[d]?.bw ?? '');
-            return `<td><input type="number" step="any" class="excel-input"
+            return `<td><input type="number" step="any" min="0" class="excel-input"
               data-animal="${a.animalId}" data-day="${d}" data-type="${type}"
               value="${val}" placeholder="" oninput="StudyDetailView.onCellChange(this)"></td>`;
           }).join('')}
@@ -308,7 +307,7 @@ const StudyDetailView = (() => {
         const label = a.subjectId || a.studyAnimalId || a.animalNumber || a.animalId.slice(-6);
         return `<tr>
           <td class="fw-semibold small ps-3">${label}</td>
-          <td><input type="number" step="any" class="excel-input" data-animal="${a.animalId}" data-type="tw"
+          <td><input type="number" step="any" min="0" class="excel-input" data-animal="${a.animalId}" data-type="tw"
             value="${localNecropsy[a.animalId]?.tumorWeight ?? ''}" placeholder=""
             oninput="StudyDetailView.onCellChange(this)" style="min-height:34px"></td>
         </tr>`;
@@ -350,7 +349,13 @@ const StudyDetailView = (() => {
 
   function onCellChange(input) {
     const { animal, day, type } = input.dataset;
-    const val = input.value === '' ? null : parseFloat(input.value);
+    let val = input.value === '' ? null : parseFloat(input.value);
+    if (val !== null && val < 0) {
+      val = 0;
+      input.value = 0;
+      input.classList.add('is-invalid');
+      setTimeout(() => input.classList.remove('is-invalid'), 1500);
+    }
     if (type === 'tw') {
       if (!localNecropsy[animal]) localNecropsy[animal] = {};
       localNecropsy[animal].tumorWeight = val;
@@ -406,30 +411,55 @@ const StudyDetailView = (() => {
     }
   }
 
-  function pasteData() {
-    const text = prompt('엑셀에서 복사한 데이터를 붙여넣어 주세요:\n(첫 행: Day 번호들, 나머지 행: 개체별 값)');
-    if (!text) return;
-    const lines = text.trim().split(/\r\n|\n|\r/);
-    const selGroups = (studyData.groups || []).filter(g => selectedGroupIds.has(g.groupId));
-    if (!selGroups.length) return;
-    const type = obsTab === 'bw' ? 'bw' : 'tv';
+  function openPasteModal() {
+    const groups = studyData.groups || [];
+    const select = document.getElementById('pasteTargetGroup');
+    if (select) {
+      select.innerHTML = groups.map(g =>
+        `<option value="${g.groupId}" ${selectedGroupIds.has(g.groupId) ? '' : ''}>${g.groupNumber}. ${g.substanceName || g.groupName || 'Group ' + g.groupNumber}</option>`
+      ).join('');
+      // Pre-select first currently selected group
+      const firstSel = groups.find(g => selectedGroupIds.has(g.groupId));
+      if (firstSel) select.value = firstSel.groupId;
+    }
+    const typeSelect = document.getElementById('pasteTargetType');
+    if (typeSelect) typeSelect.value = obsTab === 'bw' ? 'bw' : 'tv';
+    const textarea = document.getElementById('pasteTextarea');
+    if (textarea) textarea.value = '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('pasteModal')).show();
+  }
 
-    const headerDays = lines[0].split('\t').map(Number).filter(n => !isNaN(n));
-    const allAnimals = selGroups.flatMap(g => studyData.animals.filter(a => a.groupId === g.groupId));
+  function applyPaste() {
+    const text = document.getElementById('pasteTextarea')?.value || '';
+    if (!text.trim()) return;
+    const groupId = document.getElementById('pasteTargetGroup')?.value;
+    const type = document.getElementById('pasteTargetType')?.value || 'tv';
+    const selGroup = (studyData.groups || []).find(g => g.groupId === groupId);
+    if (!selGroup) return;
+
+    const animals = studyData.animals.filter(a => a.groupId === groupId);
+    const lines = text.trim().split(/\r\n|\n|\r/);
+    const firstCells = lines[0].split('\t');
+    // First cell may be label, try to detect if days start at index 0 or 1
+    const headerDays = firstCells.map(Number).filter(n => !isNaN(n));
 
     lines.slice(1).forEach((line, i) => {
-      if (i >= allAnimals.length) return;
-      const vals = line.split('\t');
+      if (i >= animals.length) return;
+      const cells = line.split('\t');
+      // Strip leading label cell if present
+      const vals = cells.length > headerDays.length ? cells.slice(1) : cells;
       headerDays.forEach((day, di) => {
         const val = parseFloat(vals[di]);
-        if (!isNaN(val)) {
-          const animalId = allAnimals[i].animalId;
+        if (!isNaN(val) && val >= 0) {
+          const animalId = animals[i].animalId;
           if (!localMeasurements[animalId]) localMeasurements[animalId] = {};
           if (!localMeasurements[animalId][day]) localMeasurements[animalId][day] = {};
           localMeasurements[animalId][day][type] = val;
         }
       });
     });
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('pasteModal')).hide();
     renderDataTable();
     setUnsaved(true);
     App.showToast('데이터가 적용되었습니다.');
@@ -482,12 +512,12 @@ const StudyDetailView = (() => {
             </div>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Y축 범위 (Tumor Volume)</label>
+            <label class="form-label small">Y축 범위 (Absolute)</label>
             <div class="d-flex gap-1 align-items-center">
-              <input type="number" class="form-control form-control-sm" id="yAxisMin" placeholder="min" value="${analysisState.yMin}" style="width:80px">
+              <input type="number" class="form-control form-control-sm" id="yMin_abs" placeholder="min" value="${analysisState.yScales.abs.min}" style="width:70px">
               <span class="small">~</span>
-              <input type="number" class="form-control form-control-sm" id="yAxisMax" placeholder="max" value="${analysisState.yMax}" style="width:80px">
-              <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.applyYScale()">적용</button>
+              <input type="number" class="form-control form-control-sm" id="yMax_abs" placeholder="max" value="${analysisState.yScales.abs.max}" style="width:70px">
+              <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.applyYScale('abs')">적용</button>
             </div>
           </div>
           <div class="col-md-3">
@@ -519,10 +549,23 @@ const StudyDetailView = (() => {
     runAnalysis();
   }
 
-  function applyYScale() {
-    analysisState.yMin = document.getElementById('yAxisMin')?.value || '';
-    analysisState.yMax = document.getElementById('yAxisMax')?.value || '';
+  function applyYScale(chartKey) {
+    if (chartKey) {
+      analysisState.yScales[chartKey].min = document.getElementById(`yMin_${chartKey}`)?.value || '';
+      analysisState.yScales[chartKey].max = document.getElementById(`yMax_${chartKey}`)?.value || '';
+    }
     runAnalysis();
+  }
+
+  function getYOpts(chartKey) {
+    const sc = analysisState.yScales[chartKey] || {};
+    const yMin = sc.min !== '' ? Number(sc.min) : undefined;
+    const yMax = sc.max !== '' ? Number(sc.max) : undefined;
+    return {
+      beginAtZero: yMin === undefined,
+      ...(yMin !== undefined ? { min: yMin } : {}),
+      ...(yMax !== undefined ? { max: yMax } : {})
+    };
   }
 
   function runAnalysis() {
@@ -556,16 +599,29 @@ const StudyDetailView = (() => {
     if (!container) return;
     const groupNames = Object.keys(groups);
 
+    function yControl(key, label) {
+      const sc = analysisState.yScales[key] || {};
+      return `<div class="d-flex align-items-center gap-1 mt-1 justify-content-center">
+        <span class="small text-muted">Y:</span>
+        <input type="number" id="yMin_${key}" placeholder="min" value="${sc.min||''}" class="form-control form-control-sm" style="width:65px">
+        <span class="small">~</span>
+        <input type="number" id="yMax_${key}" placeholder="max" value="${sc.max||''}" class="form-control form-control-sm" style="width:65px">
+        <button class="btn btn-xs btn-outline-secondary btn-sm py-0 px-1" onclick="StudyDetailView.applyYScale('${key}')">적용</button>
+      </div>`;
+    }
+
     container.innerHTML = `
       <div class="card p-4 mb-3">
         <h6 class="fw-bold mb-3">In Vivo Efficacy Curves</h6>
         <div class="row">
           <div class="col-lg-6 mb-3">
             <h6 class="text-center text-secondary small">Average Tumor Volume (Absolute)</h6>
+            ${yControl('abs','Absolute')}
             <div style="height:300px"><canvas id="chartAbs"></canvas></div>
           </div>
           <div class="col-lg-6 mb-3">
             <h6 class="text-center text-secondary small">Scaled Average Change (%)</h6>
+            ${yControl('scaled','Scaled')}
             <div style="height:300px"><canvas id="chartScaled"></canvas></div>
           </div>
           <div class="col-lg-6 mb-3">
@@ -578,18 +634,18 @@ const StudyDetailView = (() => {
           </div>
           <div class="col-lg-6 mb-3">
             <h6 class="text-center text-secondary small">Body Weight (%BL)</h6>
+            ${yControl('bw','BW')}
             <div style="height:300px"><canvas id="chartBW"></canvas></div>
           </div>
           <div class="col-lg-6 mb-3">
             <h6 class="text-center text-secondary small">Tumor Weight at Necropsy (mg)</h6>
+            ${yControl('necropsy','Necropsy')}
             <div style="height:300px"><canvas id="chartNecropsy"></canvas></div>
           </div>
         </div>
       </div>`;
 
     const ebKey = analysisState.errorBarType;
-    const yMin = analysisState.yMin !== '' ? Number(analysisState.yMin) : undefined;
-    const yMax = analysisState.yMax !== '' ? Number(analysisState.yMax) : undefined;
 
     destroyChart('abs');
     charts['abs'] = new Chart(document.getElementById('chartAbs'), {
@@ -613,12 +669,7 @@ const StudyDetailView = (() => {
         plugins: { legend: { position: 'top' } },
         scales: {
           x: { title: { display: true, text: 'Days' } },
-          y: {
-            title: { display: true, text: 'Volume (mm³)' },
-            beginAtZero: yMin === undefined,
-            ...(yMin !== undefined ? { min: yMin } : {}),
-            ...(yMax !== undefined ? { max: yMax } : {})
-          }
+          y: { title: { display: true, text: 'Volume (mm³)' }, ...getYOpts('abs') }
         }
       }
     });
@@ -639,7 +690,7 @@ const StudyDetailView = (() => {
         plugins: { legend: { position: 'top' } },
         scales: {
           x: { title: { display: true, text: 'Days' } },
-          y: { suggestedMax: 100, suggestedMin: -100, title: { display: true, text: 'Scaled Change (%)' } }
+          y: { suggestedMax: 100, suggestedMin: -100, title: { display: true, text: 'Scaled Change (%)' }, ...getYOpts('scaled') }
         }
       }
     });
@@ -716,7 +767,7 @@ const StudyDetailView = (() => {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { position: 'top' } },
-        scales: { x: { title: { display: true, text: 'Days' } }, y: { title: { display: true, text: 'BW (% of Day 1)' } } }
+        scales: { x: { title: { display: true, text: 'Days' } }, y: { title: { display: true, text: 'BW (% of Day 1)' }, ...getYOpts('bw') } }
       }
     });
 
@@ -740,7 +791,7 @@ const StudyDetailView = (() => {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
-        scales: { y: { title: { display: true, text: 'Tumor Weight (mg)' }, beginAtZero: true } }
+        scales: { y: { title: { display: true, text: 'Tumor Weight (mg)' }, beginAtZero: true, ...getYOpts('necropsy') } }
       }
     });
   }
@@ -938,7 +989,7 @@ const StudyDetailView = (() => {
   }
 
   return {
-    render, switchTab, saveData, pasteData, onCellChange,
+    render, switchTab, saveData, openPasteModal, applyPaste, onCellChange,
     toggleGroupData, selectAllGroups, switchObsTab,
     runAnalysis, runStats, setErrorBar, toggleGroup, toggleAllGroups,
     applyYScale, toggleDaySelect, exportCSV, exportJSON
