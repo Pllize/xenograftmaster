@@ -2,7 +2,7 @@
 // Deploy as Web App: Execute as Me, Access: Anyone with Google Account
 // After deploy, copy the web app URL to js/api.js APPS_SCRIPT_URL
 
-const SHEET_ID = ''; // Set your Google Spreadsheet ID here
+const SHEET_ID = '1tRJpUIGVgT88n07ubbTXr44-y7VE_Wc5kZ4CRfzXHhw';
 
 const SHEETS = {
   STUDIES: 'studies',
