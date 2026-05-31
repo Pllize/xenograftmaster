@@ -2,6 +2,8 @@
 const CSVImportView = (() => {
   let parsed = null;
   let columnMapOverride = {};
+  let groupMatchMap = {};
+  let existingStudyData = null;
 
   async function render() {
     App.setActiveNav('/import');
@@ -182,7 +184,7 @@ const CSVImportView = (() => {
           </div>
           <div id="existingStudyFields" class="col-md-5" style="display:none">
             <label class="form-label small">기존 시험 선택</label>
-            <select class="form-select form-select-sm" id="existingStudySelect"></select>
+            <select class="form-select form-select-sm" id="existingStudySelect" onchange="CSVImportView.loadGroupMatch()"></select>
           </div>
           <div class="col-md-3 d-flex align-items-end">
             <button class="btn btn-success w-100" onclick="CSVImportView.saveConverted()">저장</button>
@@ -204,6 +206,65 @@ const CSVImportView = (() => {
     const mode = document.getElementById('saveMode')?.value;
     document.getElementById('newStudyFields').style.display = mode === 'new' ? 'block' : 'none';
     document.getElementById('existingStudyFields').style.display = mode === 'existing' ? 'block' : 'none';
+    const gm = document.getElementById('groupMatchSection');
+    if (gm) gm.style.display = mode === 'existing' ? 'block' : 'none';
+    if (mode === 'existing') loadGroupMatch();
+  }
+
+  async function loadGroupMatch() {
+    const studyId = document.getElementById('existingStudySelect')?.value;
+    if (!studyId) return;
+    groupMatchMap = {};
+    existingStudyData = null;
+    try {
+      existingStudyData = await api.getStudyData(studyId);
+    } catch (e) { return; }
+
+    const records = getConvertedRecords();
+    const croGroups = [...new Set(records.map(r => r.group).filter(Boolean))];
+    const exGroups = existingStudyData.groups || [];
+
+    // Auto-match by keyword
+    const vehicleKw = /vehicle|control|veh|ctrl/i;
+    croGroups.forEach(cg => {
+      const match = exGroups.find(eg => {
+        const name = (eg.substanceName || eg.groupName || '').toLowerCase();
+        const cgLow = cg.toLowerCase();
+        if (vehicleKw.test(cgLow) && (eg.isControl || eg.groupRole === 'vehicle')) return true;
+        return name && cgLow.includes(name);
+      });
+      groupMatchMap[cg] = match?.groupId || '__new__';
+    });
+
+    let sec = document.getElementById('groupMatchSection');
+    if (!sec) {
+      sec = document.createElement('div');
+      sec.id = 'groupMatchSection';
+      sec.className = 'mt-3';
+      document.getElementById('saveSection')?.querySelector('.card')?.appendChild(sec);
+    }
+
+    sec.innerHTML = `
+      <hr>
+      <h6 class="fw-semibold mb-2">군 매칭</h6>
+      <table class="table table-sm table-bordered">
+        <thead><tr><th>CRO 군명</th><th>→ 시험 등록 군</th></tr></thead>
+        <tbody>
+          ${croGroups.map(cg => `<tr>
+            <td>${cg}</td>
+            <td>
+              <select class="form-select form-select-sm" onchange="CSVImportView.setGroupMatch('${cg.replace(/'/g,"\\'")}',this.value)">
+                ${exGroups.map(eg => `<option value="${eg.groupId}" ${groupMatchMap[cg]===eg.groupId?'selected':''}>${eg.groupNumber}. ${eg.substanceName||eg.groupName||'Group '+eg.groupNumber}</option>`).join('')}
+                <option value="__new__" ${groupMatchMap[cg]==='__new__'?'selected':''}>→ 새 군으로 추가</option>
+              </select>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  function setGroupMatch(croGroup, groupId) {
+    groupMatchMap[croGroup] = groupId;
   }
 
   async function saveConverted() {
@@ -226,27 +287,61 @@ const CSVImportView = (() => {
       if (!studyId) return App.showToast('시험을 선택해주세요.', 'error');
     }
 
-    // Group records by group name and create groups/animals/measurements
     const groupNames = [...new Set(records.map(r => r.group).filter(Boolean))];
     const allDays = [...new Set(records.flatMap(r => Object.keys(r.tumorVolumes).map(Number)))].sort((a, b) => a - b);
-
-    const groups = groupNames.map((gn, i) => ({
-      groupId: App.uuid(), studyId, groupNumber: i + 1, groupName: gn,
-      animalCount: records.filter(r => r.group === gn).length,
-      implantationDate: '', separationDate: '', day1Date: '', necropsyDate: '',
-      measurementDays: allDays, isControl: i === 0
-    }));
-
     const animals = [], measurements = [];
-    groups.forEach(g => {
-      records.filter(r => r.group === g.groupName).forEach((r, i) => {
-        const animalId = App.uuid();
-        animals.push({ animalId, studyId, groupId: g.groupId, subjectId: r.subjectId || `G${g.groupNumber}M${String(i + 1).padStart(2, '0')}`, sex: 'M' });
-        Object.entries(r.tumorVolumes).forEach(([day, tv]) => {
-          measurements.push({ measurementId: `${animalId}_${day}`, studyId, animalId, day: Number(day), tumorVolume: tv, bodyWeight: r.bodyWeights[day] ?? null, date: null });
+
+    let groups;
+    if (mode === 'existing' && existingStudyData) {
+      // Use groupMatchMap to route animals into existing or new groups
+      const exGroups = existingStudyData.groups || [];
+      const newGroupsNeeded = groupNames.filter(gn => groupMatchMap[gn] === '__new__' || !groupMatchMap[gn]);
+      const maxNum = Math.max(0, ...exGroups.map(g => g.groupNumber || 0));
+      const createdGroups = newGroupsNeeded.map((gn, i) => ({
+        groupId: App.uuid(), studyId, groupNumber: maxNum + i + 1, groupName: gn, substanceName: gn,
+        animalCount: records.filter(r => r.group === gn).length,
+        implantationDate: '', separationDate: '', day1Date: '', necropsyDate: '',
+        measurementDays: allDays, isControl: false, groupRole: 'comparator'
+      }));
+      groups = createdGroups;
+
+      const resolveGroupId = (gn) => {
+        const mapped = groupMatchMap[gn];
+        if (!mapped || mapped === '__new__') {
+          return createdGroups.find(g => g.groupName === gn)?.groupId;
+        }
+        return mapped;
+      };
+
+      groupNames.forEach(gn => {
+        const groupId = resolveGroupId(gn);
+        if (!groupId) return;
+        records.filter(r => r.group === gn).forEach((r, i) => {
+          const animalId = App.uuid();
+          animals.push({ animalId, studyId, groupId, subjectId: r.subjectId || `IM${String(i + 1).padStart(2, '0')}`, sex: 'M' });
+          Object.entries(r.tumorVolumes).forEach(([day, tv]) => {
+            measurements.push({ measurementId: `${animalId}_${day}`, studyId, animalId, day: Number(day), tumorVolume: tv, bodyWeight: r.bodyWeights[day] ?? null, date: null });
+          });
         });
       });
-    });
+    } else {
+      groups = groupNames.map((gn, i) => ({
+        groupId: App.uuid(), studyId, groupNumber: i + 1, groupName: gn,
+        animalCount: records.filter(r => r.group === gn).length,
+        implantationDate: '', separationDate: '', day1Date: '', necropsyDate: '',
+        measurementDays: allDays, isControl: i === 0
+      }));
+
+      groups.forEach(g => {
+        records.filter(r => r.group === g.groupName).forEach((r, i) => {
+          const animalId = App.uuid();
+          animals.push({ animalId, studyId, groupId: g.groupId, subjectId: r.subjectId || `G${g.groupNumber}M${String(i + 1).padStart(2, '0')}`, sex: 'M' });
+          Object.entries(r.tumorVolumes).forEach(([day, tv]) => {
+            measurements.push({ measurementId: `${animalId}_${day}`, studyId, animalId, day: Number(day), tumorVolume: tv, bodyWeight: r.bodyWeights[day] ?? null, date: null });
+          });
+        });
+      });
+    }
 
     try {
       await App.withLoading(async () => {
@@ -261,5 +356,5 @@ const CSVImportView = (() => {
     }
   }
 
-  return { render, loadFile, parse, showPreview, updateMapping, updateMappingDay, toggleSaveMode, saveConverted };
+  return { render, loadFile, parse, showPreview, updateMapping, updateMappingDay, toggleSaveMode, loadGroupMatch, setGroupMatch, saveConverted };
 })();

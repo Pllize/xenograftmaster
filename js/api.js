@@ -1,11 +1,10 @@
-// Google Apps Script URL - set this after deploying the web app
-const APPS_SCRIPT_URL = localStorage.getItem('xm_apps_script_url') || '';
+// Google Apps Script URL - embedded default, overridable via admin panel
+const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzXhHIh-a79UXGgZU-GZu5jWHiSW1deZOVVLQ-S4UP-T1RQ7F4rN1W-c6XZKp4X96x9/exec';
+const APPS_SCRIPT_URL = localStorage.getItem('xm_apps_script_url') || DEFAULT_APPS_SCRIPT_URL;
 
 const api = (() => {
   function getUrl() {
-    const url = localStorage.getItem('xm_apps_script_url') || '';
-    if (!url) throw new Error('Apps Script URL이 설정되지 않았습니다. 관리 > Google Sheets 설정에서 URL을 입력해주세요.');
-    return url;
+    return localStorage.getItem('xm_apps_script_url') || DEFAULT_APPS_SCRIPT_URL;
   }
 
   async function get(params) {
