@@ -1,71 +1,137 @@
-body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 
+body {
+  background-color: #f0f2f5;
+  font-family: 'Noto Sans KR', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 0.9rem;
+}
+
+/* ---- Navigation ---- */
 .app-header {
   background: linear-gradient(135deg, #1a252f 0%, #2c3e50 100%);
   color: white;
   padding: 0;
 }
-.app-header .navbar-brand { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.5px; }
+.app-header .navbar-brand { font-weight: 700; font-size: 1.05rem; letter-spacing: 0.3px; }
 .app-header .nav-link { color: rgba(255,255,255,0.75) !important; font-weight: 500; padding: 1rem 1.25rem; transition: all 0.2s; }
 .app-header .nav-link:hover { color: #fff !important; background: rgba(255,255,255,0.1); }
 .app-header .nav-link.active { color: #fff !important; border-bottom: 3px solid #0d6efd; }
 
-.card { border: none; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 0; }
+/* ---- Cards ---- */
+.card {
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+  margin-bottom: 0;
+}
 
 .study-card { transition: box-shadow 0.2s, transform 0.1s; }
-.study-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.12); transform: translateY(-2px); }
+.study-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.12); transform: translateY(-2px); }
 
-.group-card { background: #fafafa; }
+/* ---- Form sections ---- */
+.form-section {
+  background: #fafbfc;
+  border: 1px solid #e9ecef;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.form-section-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #6c757d;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e9ecef;
+}
 
-/* Spreadsheet table */
+/* ---- Spreadsheet table ---- */
 .excel-table td, .excel-table th { padding: 0; }
 .excel-input {
   width: 100%; height: 100%; min-height: 34px;
   border: none; background: transparent;
   text-align: center; border-radius: 0; outline: none;
   font-size: 0.875rem;
+  font-family: 'Noto Sans KR', sans-serif;
 }
 .excel-input:focus { background-color: #e8f0fe; box-shadow: inset 0 0 0 2px #0d6efd; }
 
-/* Day chips */
-.day-chip { display: inline-flex; align-items: center; gap: 4px; background: #e9ecef; border: 1px solid #dee2e6; border-radius: 4px; padding: 2px 6px; font-size: 0.8rem; }
+/* ---- Day chips ---- */
+.day-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #e9ecef; border: 1px solid #dee2e6;
+  border-radius: 4px; padding: 2px 6px; font-size: 0.8rem;
+}
 
-/* Loading overlay */
+/* ---- Group role badge colors ---- */
+.role-vehicle    { background: #1a1a1a; color: #fff; }
+.role-control    { background: #555555; color: #fff; }
+.role-sb         { background: #0d6efd; color: #fff; }
+.role-comparator { background: #dc3545; color: #fff; }
+
+/* ---- Loading overlay ---- */
 #loadingOverlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 9999;
   display: none; align-items: center; justify-content: center;
 }
-.loading-box { background: #fff; border-radius: 12px; padding: 24px 36px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-.loading-spinner { width: 40px; height: 40px; border: 4px solid #dee2e6; border-top-color: #0d6efd; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+.loading-box {
+  background: #fff; border-radius: 14px; padding: 28px 40px;
+  text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.loading-spinner {
+  width: 40px; height: 40px;
+  border: 4px solid #dee2e6; border-top-color: #0d6efd;
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin: 0 auto 12px;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Unsaved banner */
+/* ---- Unsaved banner ---- */
 #unsavedBanner { position: sticky; top: 56px; z-index: 100; border-radius: 0; border-left: none; border-right: none; }
 
-/* Toast container */
+/* ---- Toast container ---- */
 #toastContainer { position: fixed; bottom: 24px; right: 24px; z-index: 9998; display: flex; flex-direction: column; gap: 8px; }
 
-/* Nav tabs clean */
-.nav-tabs .nav-link { color: #495057; }
+/* ---- Nav tabs ---- */
+.nav-tabs .nav-link { color: #495057; font-size: 0.875rem; }
 .nav-tabs .nav-link.active { font-weight: 600; }
 
-/* Main content padding */
+/* ---- Main content ---- */
 #mainContent { padding: 24px; min-height: calc(100vh - 56px); }
 
-/* Table header */
-.table th { background-color: #f1f3f4; font-size: 0.82rem; font-weight: 600; }
+/* ---- Tables ---- */
+.table th {
+  background-color: #f1f3f4;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
 .table td { font-size: 0.875rem; vertical-align: middle; }
+.table > :not(caption) > * > * { padding: 0.55rem 0.6rem; }
 
-/* Badge extra small */
-.badge { font-weight: 500; }
+/* ---- Badges ---- */
+.badge { font-weight: 500; font-size: 0.75rem; }
 
-/* Form label smaller */
-.form-label { font-size: 0.85rem; font-weight: 500; margin-bottom: 4px; }
+/* ---- Form labels ---- */
+.form-label { font-size: 0.82rem; font-weight: 600; margin-bottom: 4px; color: #495057; }
 
-/* Responsive chart container */
-.chart-container { position: relative; }
+/* ---- Buttons ---- */
+.btn { border-radius: 7px; font-weight: 500; }
+.btn-sm { border-radius: 5px; font-size: 0.8rem; }
+.btn-xs { font-size: 0.75rem; padding: 2px 8px; }
 
+/* ---- Group header rows in data table ---- */
+.group-row-header td {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 5px 12px !important;
+}
+
+/* ---- Responsive ---- */
 @media (max-width: 768px) {
   #mainContent { padding: 12px; }
   .app-header .nav-link { padding: 0.75rem 0.75rem; font-size: 0.85rem; }
+  .form-section { padding: 14px; }
 }

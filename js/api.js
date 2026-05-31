@@ -11,19 +11,17 @@ const api = (() => {
   async function get(params) {
     const url = getUrl();
     const qs = new URLSearchParams(params).toString();
-    const resp = await fetch(`${url}?${qs}`);
+    const resp = await fetch(`${url}?${qs}`, { redirect: 'follow' });
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
     return json;
   }
 
+  // Apps Script POST via GET with payload param (avoids CORS preflight)
   async function post(action, data) {
     const url = getUrl();
-    const resp = await fetch(url, {
-      method: 'POST',
-      body: JSON.stringify({ action, data }),
-      headers: { 'Content-Type': 'text/plain' } // Apps Script requires text/plain for CORS
-    });
+    const payload = encodeURIComponent(JSON.stringify({ action, data }));
+    const resp = await fetch(`${url}?payload=${payload}`, { redirect: 'follow' });
     const json = await resp.json();
     if (json.error) throw new Error(json.error);
     return json;
@@ -57,6 +55,16 @@ const api = (() => {
     async getCodes(codeType) { return get({ action: 'getCodes', codeType }); },
     async saveCode(data) { return post('saveCode', data); },
     async deleteCode(codeType, codeValue) { return post('deleteCode', { codeType, codeValue }); },
+
+    // Substances
+    async getSubstances() { return get({ action: 'getSubstances' }); },
+    async saveSubstance(data) { return post('saveSubstance', data); },
+    async deleteSubstance(substanceId) { return post('deleteSubstance', { substanceId }); },
+
+    // Competitors
+    async getCompetitors() { return get({ action: 'getCompetitors' }); },
+    async saveCompetitor(data) { return post('saveCompetitor', data); },
+    async deleteCompetitor(competitorId) { return post('deleteCompetitor', { competitorId }); },
 
     // Export/Import
     async exportAll() { return get({ action: 'exportAll' }); },
@@ -107,7 +115,8 @@ const api = (() => {
 
       groups.forEach(g => {
         const grpData = groupMap[g.groupId];
-        analysisGroups[g.groupName] = Object.values(grpData.subjects);
+        const displayName = g.substanceName || g.groupName || ('Group ' + g.groupNumber);
+        analysisGroups[displayName] = Object.values(grpData.subjects);
         Object.values(grpData.subjects).forEach(s => {
           Object.keys(s.vols).forEach(d => allDays.add(Number(d)));
         });
@@ -117,7 +126,13 @@ const api = (() => {
         groups: analysisGroups,
         days: Array.from(allDays).sort((a, b) => a - b),
         groupMeta: groups.reduce((acc, g) => {
-          acc[g.groupName] = { isControl: g.isControl, groupNumber: g.groupNumber };
+          const displayName = g.substanceName || g.groupName || ('Group ' + g.groupNumber);
+          acc[displayName] = {
+            isControl: g.isControl || g.groupRole === 'vehicle' || g.groupRole === 'control',
+            groupNumber: g.groupNumber,
+            groupRole: g.groupRole || 'SB',
+            groupId: g.groupId
+          };
           return acc;
         }, {})
       };

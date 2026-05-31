@@ -1,23 +1,58 @@
 // Study Detail view - Overview, Data Entry, Analysis, Export tabs
 const StudyDetailView = (() => {
   let studyData = null;
-  let localMeasurements = {}; // animalId -> { day -> { tv, bw } }
-  let localNecropsy = {};     // animalId -> { tumorWeight }
+  let localMeasurements = {};
+  let localNecropsy = {};
   let currentTab = 'overview';
   let unsaved = false;
+  let selectedGroupIds = new Set();
+  let obsTab = 'tv';
+  let groupColorMap = {};
 
-  // Analysis state
   let analysisState = {
     visibleGroups: new Set(),
     errorBarType: 'sem',
     controlGroup: null,
     statMethod: 'welch',
-    statDays: 'all',
-    selectedStatDays: [],
-    crThreshold: 0
+    crThreshold: 0,
+    yMin: '',
+    yMax: ''
   };
 
   let charts = {};
+
+  const ROLE_PALETTES = {
+    vehicle:    ['#1a1a1a'],
+    control:    ['#555555'],
+    SB:         ['#0d6efd','#0a58ca','#084298','#6ea8fe','#9ec5fe'],
+    comparator: ['#dc3545','#b02a37','#842029','#f1aeb5','#f8d7da']
+  };
+
+  function buildGroupColorMap(groups) {
+    const map = {};
+    const counters = { vehicle: 0, control: 0, SB: 0, comparator: 0 };
+    const sorted = [...groups].sort((a, b) => (Number(a.groupNumber) || 0) - (Number(b.groupNumber) || 0));
+    sorted.forEach(g => {
+      const role = g.groupRole || 'SB';
+      const palette = ROLE_PALETTES[role] || ROLE_PALETTES.SB;
+      const idx = counters[role] || 0;
+      map[g.groupId] = palette[idx % palette.length];
+      counters[role] = idx + 1;
+    });
+    return map;
+  }
+
+  function getContrastColor(hex) {
+    if (!hex || hex.length < 7) return '#000';
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128 ? '#fff' : '#000';
+  }
+
+  function groupDisplayName(g) {
+    return g.substanceName || g.groupName || ('Group ' + g.groupNumber);
+  }
 
   async function render(params) {
     App.setActiveNav('/data');
@@ -29,7 +64,6 @@ const StudyDetailView = (() => {
       return;
     }
 
-    // Initialize local state from loaded data
     localMeasurements = {};
     localNecropsy = {};
     (studyData.measurements || []).forEach(m => {
@@ -42,16 +76,21 @@ const StudyDetailView = (() => {
       localNecropsy[n.animalId] = { tumorWeight: Number(n.tumorWeight) };
     });
 
+    groupColorMap = buildGroupColorMap(studyData.groups || []);
+    selectedGroupIds = new Set((studyData.groups || []).map(g => g.groupId));
+    obsTab = 'tv';
+
     const s = studyData.study;
-    const isCompetitor = s.dataSource === '경쟁사';
+    const isSB = s.dataSource === 'SB' || s.dataSource === '자체';
+    const badge = isSB
+      ? `<span class="badge bg-primary ms-2">🏢 SB</span>`
+      : `<span class="badge bg-warning text-dark ms-2">🏷 경쟁사</span>`;
 
     App.renderContent(`
       <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
         <div class="d-flex align-items-center gap-2">
           <button class="btn btn-sm btn-outline-secondary" onclick="Router.navigate('/data')">← 목록</button>
-          <h4 class="fw-bold mb-0">${s.studyNumber || '(번호 없음)'}
-            ${isCompetitor ? `<span class="badge bg-warning text-dark ms-2">🏷 경쟁사</span>` : `<span class="badge bg-primary ms-2">🏢 자체</span>`}
-          </h4>
+          <h4 class="fw-bold mb-0">${s.studyNumber || '(번호 없음)'}${badge}</h4>
         </div>
         <button class="btn btn-sm btn-outline-secondary" onclick="Router.navigate('/study/${s.studyId}/edit')">수정</button>
       </div>
@@ -93,6 +132,7 @@ const StudyDetailView = (() => {
   function renderOverview(container) {
     const s = studyData.study;
     const groups = studyData.groups || [];
+    const isCompetitor = s.dataSource === '경쟁사';
     container.innerHTML = `
       <div class="card p-4">
         <div class="row g-3">
@@ -100,10 +140,12 @@ const StudyDetailView = (() => {
           <div class="col-md-2"><strong>연도</strong><p>${s.year || '-'}</p></div>
           <div class="col-md-2"><strong>분류</strong><p>${s.classification || '-'}</p></div>
           <div class="col-md-3"><strong>모델명</strong><p>${s.modelName || '-'}</p></div>
+          <div class="col-md-2"><strong>Strain</strong><p>${s.strain || '-'}</p></div>
+          ${s.projectName ? `<div class="col-md-4"><strong>과제명</strong><p>${s.projectName}</p></div>` : ''}
           <div class="col-md-2"><strong>CRO</strong><p>${s.cro || '-'}</p></div>
           ${s.protocolLink ? `<div class="col-md-6"><strong>시험계획서</strong><p><a href="${s.protocolLink}" target="_blank">링크 열기</a></p></div>` : ''}
           ${s.reportLink ? `<div class="col-md-6"><strong>시험보고서</strong><p><a href="${s.reportLink}" target="_blank">링크 열기</a></p></div>` : ''}
-          ${s.dataSource === '경쟁사' ? `
+          ${isCompetitor ? `
           <div class="col-md-4"><strong>약물명</strong><p>${s.competitorDrug || '-'}</p></div>
           <div class="col-md-8"><strong>출처</strong><p>${s.competitorSource || '-'}</p></div>` : ''}
         </div>
@@ -112,15 +154,23 @@ const StudyDetailView = (() => {
         <h6 class="fw-bold mb-3">군 구성 (${groups.length}개 군)</h6>
         <div class="table-responsive">
           <table class="table table-sm table-bordered">
-            <thead><tr><th>군번호</th><th>군명</th><th>동물수</th><th>이식일</th><th>군분리일</th><th>Day 1</th><th>부검일</th><th>측정일</th><th>Control</th></tr></thead>
+            <thead><tr><th>#</th><th>투여물질</th><th>역할</th><th>동물수</th><th>이식일</th><th>군분리일</th><th>Day 1</th><th>부검일</th><th>측정일</th></tr></thead>
             <tbody>
-              ${groups.map(g => `<tr>
-                <td>${g.groupNumber}</td><td>${g.groupName}</td><td>${g.animalCount}</td>
-                <td>${App.formatDate(g.implantationDate)}</td><td>${App.formatDate(g.separationDate)}</td>
-                <td>${App.formatDate(g.day1Date)}</td><td>${App.formatDate(g.necropsyDate)}</td>
-                <td class="small">${(Array.isArray(g.measurementDays) ? g.measurementDays : []).map(d => 'D'+d).join(', ')}</td>
-                <td>${g.isControl ? '✓' : ''}</td>
-              </tr>`).join('')}
+              ${groups.map(g => {
+                const color = groupColorMap[g.groupId] || '#888';
+                const contrast = getContrastColor(color);
+                const role = g.groupRole || (g.isControl ? 'control' : 'SB');
+                return `<tr>
+                  <td>${g.groupNumber}</td>
+                  <td><span style="background:${color};color:${contrast};padding:2px 8px;border-radius:4px;font-size:0.8rem">${groupDisplayName(g)}</span></td>
+                  <td>${role}</td><td>${g.animalCount}</td>
+                  <td>${App.formatDate(g.implantationDate)}</td>
+                  <td>${App.formatDate(g.separationDate)}</td>
+                  <td>${App.formatDate(g.day1Date)}</td>
+                  <td>${App.formatDate(g.necropsyDate)}</td>
+                  <td class="small">${(Array.isArray(g.measurementDays) ? g.measurementDays : []).map(d => 'D'+d).join(', ')}</td>
+                </tr>`;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -129,27 +179,36 @@ const StudyDetailView = (() => {
 
   function renderDataEntry(container) {
     const groups = studyData.groups || [];
-    if (!groups.length) { container.innerHTML = '<div class="alert alert-info">군 구성이 없습니다. 수정 버튼으로 군을 추가하세요.</div>'; return; }
+    if (!groups.length) {
+      container.innerHTML = '<div class="alert alert-info">군 구성이 없습니다. 수정 버튼으로 군을 추가하세요.</div>';
+      return;
+    }
 
-    const firstGroup = groups[0];
+    const allSelected = selectedGroupIds.size === groups.length;
+    const groupBtns = groups.map(g => {
+      const color = groupColorMap[g.groupId] || '#888';
+      const isSelected = selectedGroupIds.has(g.groupId);
+      const contrast = getContrastColor(color);
+      const style = isSelected
+        ? `background:${color};color:${contrast};border-color:${color}`
+        : `color:${color};border-color:${color};background:transparent`;
+      return `<button class="btn btn-sm" style="${style}" onclick="StudyDetailView.toggleGroupData('${g.groupId}')">${groupDisplayName(g)}</button>`;
+    }).join('');
+
     container.innerHTML = `
       <div class="card p-3 mb-3">
-        <div class="row g-2 align-items-end">
-          <div class="col-md-3">
-            <label class="form-label small">군 선택</label>
-            <select class="form-select form-select-sm" id="groupSelector" onchange="StudyDetailView.onGroupSelect()">
-              ${groups.map(g => `<option value="${g.groupId}">${g.groupName}</option>`).join('')}
-            </select>
+        <div class="mb-2 d-flex flex-wrap align-items-center gap-1">
+          <span class="small fw-semibold text-secondary me-1">군:</span>
+          <button class="btn btn-sm ${allSelected ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.selectAllGroups()">전체</button>
+          ${groupBtns}
+        </div>
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <div class="btn-group btn-group-sm">
+            <button class="btn ${obsTab==='tv' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.switchObsTab('tv')">Tumor Volume</button>
+            <button class="btn ${obsTab==='bw' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.switchObsTab('bw')">Body Weight</button>
+            <button class="btn ${obsTab==='necropsy' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.switchObsTab('necropsy')">Necropsy</button>
           </div>
-          <div class="col-md-3">
-            <label class="form-label small">측정 유형</label>
-            <select class="form-select form-select-sm" id="measureTypeSelector" onchange="StudyDetailView.renderDataTable()">
-              <option value="tv">Tumor Volume (mm³)</option>
-              <option value="bw">Body Weight (g)</option>
-              <option value="necropsy">Necropsy (Tumor Weight mg)</option>
-            </select>
-          </div>
-          <div class="col-md-6 d-flex gap-2 justify-content-end align-items-end">
+          <div class="d-flex gap-2">
             <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.pasteData()">📋 붙여넣기</button>
             <button class="btn btn-sm btn-primary fw-bold" onclick="StudyDetailView.saveData()">💾 저장</button>
           </div>
@@ -160,67 +219,133 @@ const StudyDetailView = (() => {
     renderDataTable();
   }
 
-  function getCurrentGroup() {
-    const sel = document.getElementById('groupSelector');
-    if (!sel) return null;
-    return studyData.groups.find(g => g.groupId === sel.value);
-  }
-
-  function onGroupSelect() { renderDataTable(); }
-
   function renderDataTable() {
     const container = document.getElementById('dataTableContainer');
     if (!container) return;
-    const group = getCurrentGroup();
-    if (!group) return;
-    const type = document.getElementById('measureTypeSelector')?.value || 'tv';
-    const animals = studyData.animals.filter(a => a.groupId === group.groupId);
-    const days = Array.isArray(group.measurementDays) ? group.measurementDays : [];
+    const groups = (studyData.groups || []).filter(g => selectedGroupIds.has(g.groupId));
+    if (!groups.length) { container.innerHTML = '<div class="alert alert-info">군을 선택해주세요.</div>'; return; }
 
-    if (type === 'necropsy') {
-      container.innerHTML = `
-        <div class="card p-3">
-          <p class="small text-secondary mb-2">부검일: ${App.formatDate(group.necropsyDate) || '미설정'}</p>
-          <table class="table table-bordered table-sm text-center excel-table">
-            <thead><tr><th>개체 ID</th><th>Tumor Weight (mg)</th></tr></thead>
-            <tbody>
-              ${animals.map(a => `<tr>
-                <td>${a.subjectId}</td>
-                <td><input type="number" step="any" class="excel-input" data-animal="${a.animalId}" data-type="tw"
-                  value="${localNecropsy[a.animalId]?.tumorWeight ?? ''}" placeholder="..." oninput="StudyDetailView.onCellChange(this)"></td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-      return;
+    if (obsTab === 'necropsy') {
+      renderNecropsyTable(container, groups);
+    } else {
+      renderMeasurementTable(container, groups, obsTab);
     }
+  }
 
-    const dayLabels = days.map(d => {
-      const label = group.day1Date ? ` (${App.addDays(group.day1Date, d - 1)})` : '';
-      return `<th style="min-width:90px">Day ${d}<br><small class="text-muted">${label}</small></th>`;
+  function renderMeasurementTable(container, groups, type) {
+    const allDays = new Set();
+    groups.forEach(g => {
+      (Array.isArray(g.measurementDays) ? g.measurementDays : []).forEach(d => allDays.add(Number(d)));
     });
+    const days = Array.from(allDays).sort((a, b) => a - b);
+    if (!days.length) { container.innerHTML = '<div class="alert alert-info">측정일이 설정되지 않았습니다.</div>'; return; }
+
+    const colLabel = type === 'tv' ? 'mm³' : 'g';
+
+    const bodyRows = groups.flatMap(g => {
+      const animals = studyData.animals.filter(a => a.groupId === g.groupId);
+      const color = groupColorMap[g.groupId] || '#888';
+      const contrast = getContrastColor(color);
+      const name = groupDisplayName(g);
+      const gDays = new Set((Array.isArray(g.measurementDays) ? g.measurementDays : []).map(Number));
+
+      const headerRow = `<tr>
+        <td colspan="${days.length + 1}"
+          style="background:${color};color:${contrast};font-weight:600;padding:5px 12px;font-size:0.82rem">
+          ${g.groupNumber}. ${name} (n=${animals.length})
+        </td>
+      </tr>`;
+
+      const animalRows = animals.map(a => {
+        const label = a.subjectId || a.studyAnimalId || a.animalNumber || a.animalId.slice(-6);
+        return `<tr>
+          <td class="fw-semibold small ps-3" style="min-width:80px">${label}</td>
+          ${days.map(d => {
+            if (!gDays.has(d)) return '<td style="background:#f5f5f5"></td>';
+            const val = type === 'tv'
+              ? (localMeasurements[a.animalId]?.[d]?.tv ?? '')
+              : (localMeasurements[a.animalId]?.[d]?.bw ?? '');
+            return `<td><input type="number" step="any" class="excel-input"
+              data-animal="${a.animalId}" data-day="${d}" data-type="${type}"
+              value="${val}" placeholder="" oninput="StudyDetailView.onCellChange(this)"></td>`;
+          }).join('')}
+        </tr>`;
+      }).join('');
+
+      return headerRow + animalRows;
+    }).join('');
 
     container.innerHTML = `
       <div class="card p-3">
         <div class="table-responsive">
           <table class="table table-bordered table-sm text-center excel-table">
-            <thead><tr><th style="min-width:80px">개체 ID</th>${dayLabels.join('')}</tr></thead>
-            <tbody>
-              ${animals.map(a => `<tr>
-                <td class="fw-bold">${a.subjectId}</td>
-                ${days.map(d => {
-                  const val = type === 'tv'
-                    ? (localMeasurements[a.animalId]?.[d]?.tv ?? '')
-                    : (localMeasurements[a.animalId]?.[d]?.bw ?? '');
-                  return `<td><input type="number" step="any" class="excel-input"
-                    data-animal="${a.animalId}" data-day="${d}" data-type="${type}"
-                    value="${val}" placeholder="..." oninput="StudyDetailView.onCellChange(this)"></td>`;
-                }).join('')}
-              </tr>`).join('')}
-            </tbody>
+            <thead>
+              <tr>
+                <th style="min-width:80px">개체 ID</th>
+                ${days.map(d => `<th style="min-width:85px">Day ${d}<br><small class="text-muted fw-normal">${colLabel}</small></th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
           </table>
         </div>
       </div>`;
+  }
+
+  function renderNecropsyTable(container, groups) {
+    const bodyRows = groups.flatMap(g => {
+      const animals = studyData.animals.filter(a => a.groupId === g.groupId);
+      const color = groupColorMap[g.groupId] || '#888';
+      const contrast = getContrastColor(color);
+      const name = groupDisplayName(g);
+
+      const headerRow = `<tr>
+        <td colspan="2" style="background:${color};color:${contrast};font-weight:600;padding:5px 12px;font-size:0.82rem">
+          ${g.groupNumber}. ${name} — 부검일: ${App.formatDate(g.necropsyDate) || '미설정'}
+        </td>
+      </tr>`;
+
+      const animalRows = animals.map(a => {
+        const label = a.subjectId || a.studyAnimalId || a.animalNumber || a.animalId.slice(-6);
+        return `<tr>
+          <td class="fw-semibold small ps-3">${label}</td>
+          <td><input type="number" step="any" class="excel-input" data-animal="${a.animalId}" data-type="tw"
+            value="${localNecropsy[a.animalId]?.tumorWeight ?? ''}" placeholder=""
+            oninput="StudyDetailView.onCellChange(this)" style="min-height:34px"></td>
+        </tr>`;
+      }).join('');
+
+      return headerRow + animalRows;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="card p-3">
+        <p class="small text-muted mb-2">Tumor Weight (mg) — 부검 시 1회 측정</p>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm excel-table" style="max-width:400px">
+            <thead><tr><th>개체 ID</th><th style="min-width:140px">Tumor Weight (mg)</th></tr></thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  function toggleGroupData(groupId) {
+    if (selectedGroupIds.has(groupId)) {
+      if (selectedGroupIds.size > 1) selectedGroupIds.delete(groupId);
+    } else {
+      selectedGroupIds.add(groupId);
+    }
+    renderDataEntry(document.getElementById('tabContent'));
+  }
+
+  function selectAllGroups() {
+    (studyData.groups || []).forEach(g => selectedGroupIds.add(g.groupId));
+    renderDataEntry(document.getElementById('tabContent'));
+  }
+
+  function switchObsTab(type) {
+    obsTab = type;
+    renderDataEntry(document.getElementById('tabContent'));
   }
 
   function onCellChange(input) {
@@ -285,19 +410,20 @@ const StudyDetailView = (() => {
     const text = prompt('엑셀에서 복사한 데이터를 붙여넣어 주세요:\n(첫 행: Day 번호들, 나머지 행: 개체별 값)');
     if (!text) return;
     const lines = text.trim().split(/\r\n|\n|\r/);
-    const group = getCurrentGroup();
-    const type = document.getElementById('measureTypeSelector')?.value || 'tv';
-    const animals = studyData.animals.filter(a => a.groupId === group?.groupId);
-    if (!group || !animals.length) return;
+    const selGroups = (studyData.groups || []).filter(g => selectedGroupIds.has(g.groupId));
+    if (!selGroups.length) return;
+    const type = obsTab === 'bw' ? 'bw' : 'tv';
 
     const headerDays = lines[0].split('\t').map(Number).filter(n => !isNaN(n));
+    const allAnimals = selGroups.flatMap(g => studyData.animals.filter(a => a.groupId === g.groupId));
+
     lines.slice(1).forEach((line, i) => {
-      if (i >= animals.length) return;
+      if (i >= allAnimals.length) return;
       const vals = line.split('\t');
       headerDays.forEach((day, di) => {
         const val = parseFloat(vals[di]);
         if (!isNaN(val)) {
-          const animalId = animals[i].animalId;
+          const animalId = allAnimals[i].animalId;
           if (!localMeasurements[animalId]) localMeasurements[animalId] = {};
           if (!localMeasurements[animalId][day]) localMeasurements[animalId][day] = {};
           localMeasurements[animalId][day][type] = val;
@@ -310,12 +436,30 @@ const StudyDetailView = (() => {
   }
 
   // ---- Analysis tab ----
+
+  function buildAnalysisGroupColorMap(groupMeta) {
+    const map = {};
+    const counters = { vehicle: 0, control: 0, SB: 0, comparator: 0 };
+    const entries = Object.entries(groupMeta).sort((a, b) =>
+      (a[1].groupNumber || 0) - (b[1].groupNumber || 0));
+    entries.forEach(([name, meta]) => {
+      const role = meta.groupRole || 'SB';
+      const palette = ROLE_PALETTES[role] || ROLE_PALETTES.SB;
+      const idx = counters[role] || 0;
+      map[name] = palette[idx % palette.length];
+      counters[role] = idx + 1;
+    });
+    return map;
+  }
+
   function renderAnalysis(container) {
     const payload = api.buildAnalysisPayload(studyData);
     const groupNames = Object.keys(payload.groups);
-    if (!groupNames.length) { container.innerHTML = '<div class="alert alert-info">분석할 데이터가 없습니다. 데이터 입력 탭에서 측정값을 입력하세요.</div>'; return; }
+    if (!groupNames.length) {
+      container.innerHTML = '<div class="alert alert-info">분석할 데이터가 없습니다. 데이터 입력 탭에서 측정값을 입력하세요.</div>';
+      return;
+    }
 
-    // Defaults
     if (!analysisState.controlGroup) {
       analysisState.controlGroup = groupNames.find(g => payload.groupMeta[g]?.isControl) || groupNames[0];
     }
@@ -331,14 +475,23 @@ const StudyDetailView = (() => {
             </select>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Error Bar 유형</label>
+            <label class="form-label small">Error Bar</label>
             <div class="btn-group btn-group-sm">
-              <button class="btn ${analysisState.errorBarType === 'sem' ? 'btn-primary' : 'btn-outline-primary'}" onclick="StudyDetailView.setErrorBar('sem')">SEM</button>
-              <button class="btn ${analysisState.errorBarType === 'sd' ? 'btn-primary' : 'btn-outline-primary'}" onclick="StudyDetailView.setErrorBar('sd')">SD</button>
+              <button class="btn ${analysisState.errorBarType==='sem' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.setErrorBar('sem')">SEM</button>
+              <button class="btn ${analysisState.errorBarType==='sd' ? 'btn-dark' : 'btn-outline-dark'}" onclick="StudyDetailView.setErrorBar('sd')">SD</button>
             </div>
           </div>
           <div class="col-md-3">
-            <label class="form-label small">CR threshold (mm³, 0=수학적 0)</label>
+            <label class="form-label small">Y축 범위 (Tumor Volume)</label>
+            <div class="d-flex gap-1 align-items-center">
+              <input type="number" class="form-control form-control-sm" id="yAxisMin" placeholder="min" value="${analysisState.yMin}" style="width:80px">
+              <span class="small">~</span>
+              <input type="number" class="form-control form-control-sm" id="yAxisMax" placeholder="max" value="${analysisState.yMax}" style="width:80px">
+              <button class="btn btn-sm btn-outline-secondary" onclick="StudyDetailView.applyYScale()">적용</button>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">CR threshold (mm³)</label>
             <input class="form-control form-control-sm" type="number" id="a_crThreshold" value="${analysisState.crThreshold}"
               onchange="analysisState.crThreshold=Number(this.value);StudyDetailView.runAnalysis();" style="width:120px">
           </div>
@@ -346,14 +499,14 @@ const StudyDetailView = (() => {
         <div class="mt-2">
           <label class="form-label small">표시 군</label>
           <div class="d-flex flex-wrap gap-2">
-            <button class="btn btn-xs btn-sm btn-outline-secondary" onclick="StudyDetailView.toggleAllGroups(true,${JSON.stringify(groupNames)})">전체</button>
-            <button class="btn btn-xs btn-sm btn-outline-secondary" onclick="StudyDetailView.toggleAllGroups(false,${JSON.stringify(groupNames)})">해제</button>
+            <button class="btn btn-sm btn-sm btn-outline-secondary" onclick="StudyDetailView.toggleAllGroups(true,${JSON.stringify(groupNames)})">전체</button>
+            <button class="btn btn-sm btn-sm btn-outline-secondary" onclick="StudyDetailView.toggleAllGroups(false,${JSON.stringify(groupNames)})">해제</button>
             ${groupNames.map(g => `
               <div class="form-check form-check-inline mb-0">
-                <input class="form-check-input" type="checkbox" id="vg_${g.replace(/\s/g,'_')}"
+                <input class="form-check-input" type="checkbox" id="vg_${g.replace(/\W/g,'_')}"
                   ${analysisState.visibleGroups.has(g) ? 'checked' : ''}
-                  onchange="StudyDetailView.toggleGroup('${g}',this.checked)">
-                <label class="form-check-label small" for="vg_${g.replace(/\s/g,'_')}">${g}</label>
+                  onchange="StudyDetailView.toggleGroup('${g.replace(/'/g,"\\'")}',this.checked)">
+                <label class="form-check-label small" for="vg_${g.replace(/\W/g,'_')}">${g}</label>
               </div>`).join('')}
           </div>
         </div>
@@ -361,15 +514,22 @@ const StudyDetailView = (() => {
 
       <div id="analysisCharts"></div>
       <div id="efficacyTable" class="mt-3"></div>
-      <div id="statsSection" class="mt-3"></div>
-    `;
+      <div id="statsSection" class="mt-3"></div>`;
 
+    runAnalysis();
+  }
+
+  function applyYScale() {
+    analysisState.yMin = document.getElementById('yAxisMin')?.value || '';
+    analysisState.yMax = document.getElementById('yAxisMax')?.value || '';
     runAnalysis();
   }
 
   function runAnalysis() {
     const payload = api.buildAnalysisPayload(studyData);
     analysisState.controlGroup = document.getElementById('a_controlGroup')?.value || analysisState.controlGroup;
+    analysisState.yMin = document.getElementById('yAxisMin')?.value ?? analysisState.yMin;
+    analysisState.yMax = document.getElementById('yAxisMax')?.value ?? analysisState.yMax;
 
     const visible = {};
     Object.keys(payload.groups).forEach(g => {
@@ -381,18 +541,17 @@ const StudyDetailView = (() => {
     const bwStats = Analysis.calcBodyWeightStats(visible, payload.days);
     const necropsyStats = Analysis.calcNecropsyStats(visible);
 
-    renderCharts(visible, payload.days, stats, scaledStats, bwStats, necropsyStats);
-    renderEfficacyTable(metrics, analysisState.controlGroup);
+    const aColorMap = buildAnalysisGroupColorMap(payload.groupMeta);
+    renderCharts(visible, payload.days, stats, scaledStats, bwStats, necropsyStats, aColorMap);
+    renderEfficacyTable(metrics, analysisState.controlGroup, aColorMap);
     renderStatsSection(payload.groups, payload.days);
   }
-
-  const COLORS = ['#0d6efd','#dc3545','#198754','#ffc107','#0dcaf0','#6f42c1','#d63384','#fd7e14','#20c997','#6610f2'];
 
   function destroyChart(id) {
     if (charts[id]) { charts[id].destroy(); delete charts[id]; }
   }
 
-  function renderCharts(groups, days, stats, scaledStats, bwStats, necropsyStats) {
+  function renderCharts(groups, days, stats, scaledStats, bwStats, necropsyStats, colorMap) {
     const container = document.getElementById('analysisCharts');
     if (!container) return;
     const groupNames = Object.keys(groups);
@@ -428,91 +587,98 @@ const StudyDetailView = (() => {
         </div>
       </div>`;
 
-    const ebKey = analysisState.errorBarType; // 'sem' or 'sd'
+    const ebKey = analysisState.errorBarType;
+    const yMin = analysisState.yMin !== '' ? Number(analysisState.yMin) : undefined;
+    const yMax = analysisState.yMax !== '' ? Number(analysisState.yMax) : undefined;
 
-    // Chart 1: Absolute tumor volume with error bars
     destroyChart('abs');
     charts['abs'] = new Chart(document.getElementById('chartAbs'), {
       type: 'line',
       data: {
         labels: days.map(d => 'Day ' + d),
-        datasets: groupNames.map((g, ci) => ({
+        datasets: groupNames.map(g => ({
           label: g,
           data: days.map(d => stats[g][d]?.mean ?? null),
-          borderColor: COLORS[ci % COLORS.length],
-          backgroundColor: COLORS[ci % COLORS.length],
+          borderColor: colorMap[g] || '#888',
+          backgroundColor: colorMap[g] || '#888',
           fill: false, tension: 0.2, pointRadius: 4,
           errorBars: days.reduce((acc, d) => {
-            acc['Day ' + d] = {
-              plus: stats[g][d]?.[ebKey] ?? 0,
-              minus: stats[g][d]?.[ebKey] ?? 0
-            };
+            acc['Day ' + d] = { plus: stats[g][d]?.[ebKey] ?? 0, minus: stats[g][d]?.[ebKey] ?? 0 };
             return acc;
           }, {})
         }))
       },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: {
+        responsive: true, maintainAspectRatio: false,
         plugins: { legend: { position: 'top' } },
-        scales: { x: { title: { display: true, text: 'Days' } }, y: { title: { display: true, text: 'Volume (mm³)' }, beginAtZero: true } }
+        scales: {
+          x: { title: { display: true, text: 'Days' } },
+          y: {
+            title: { display: true, text: 'Volume (mm³)' },
+            beginAtZero: yMin === undefined,
+            ...(yMin !== undefined ? { min: yMin } : {}),
+            ...(yMax !== undefined ? { max: yMax } : {})
+          }
+        }
       }
     });
 
-    // Chart 2: Scaled change
     destroyChart('scaled');
     charts['scaled'] = new Chart(document.getElementById('chartScaled'), {
       type: 'line',
       data: {
         labels: days.map(d => 'Day ' + d),
-        datasets: groupNames.map((g, ci) => ({
+        datasets: groupNames.map(g => ({
           label: g, data: days.map(d => scaledStats[g][d] ?? null),
-          borderColor: COLORS[ci % COLORS.length], backgroundColor: COLORS[ci % COLORS.length],
+          borderColor: colorMap[g] || '#888', backgroundColor: colorMap[g] || '#888',
           fill: false, tension: 0.2, pointRadius: 4
         }))
       },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'top' },
-          tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + (ctx.parsed.y?.toFixed(1) ?? '') + '%' } } },
-        scales: { x: { title: { display: true, text: 'Days' } },
-          y: { suggestedMax: 100, suggestedMin: -100, title: { display: true, text: 'Scaled Change (%)' },
-            grid: { color: ctx => ctx.tick.value === 0 ? '#333' : 'rgba(0,0,0,0.1)' } } }
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top' } },
+        scales: {
+          x: { title: { display: true, text: 'Days' } },
+          y: { suggestedMax: 100, suggestedMin: -100, title: { display: true, text: 'Scaled Change (%)' } }
+        }
       }
     });
 
-    // Chart 3: Spider plot (individual animals)
     destroyChart('spider');
     const spiderDatasets = [];
-    groupNames.forEach((g, ci) => {
+    groupNames.forEach(g => {
       groups[g].forEach((sub, si) => {
         spiderDatasets.push({
           label: si === 0 ? g : '',
           data: days.map(d => sub.vols[d] ?? null),
-          borderColor: COLORS[ci % COLORS.length] + '88',
+          borderColor: (colorMap[g] || '#888') + '88',
           backgroundColor: 'transparent',
-          borderWidth: 1, pointRadius: 2, tension: 0.2,
-          showInLegend: si === 0
+          borderWidth: 1.5, pointRadius: 2, tension: 0.2
         });
       });
     });
     charts['spider'] = new Chart(document.getElementById('chartSpider'), {
       type: 'line',
       data: { labels: days.map(d => 'Day ' + d), datasets: spiderDatasets },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: {
+        responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
-        scales: { x: { title: { display: true, text: 'Days' } }, y: { title: { display: true, text: 'Volume (mm³)' }, beginAtZero: true } }
+        scales: {
+          x: { title: { display: true, text: 'Days' } },
+          y: { title: { display: true, text: 'Volume (mm³)' }, beginAtZero: true }
+        }
       }
     });
 
-    // Chart 4: Waterfall plot
     destroyChart('waterfall');
     const waterfallData = [];
-    groupNames.forEach((g, ci) => {
+    groupNames.forEach(g => {
       groups[g].forEach(sub => {
         const v0 = sub.vols[days[0]];
         if (!v0) return;
         const vols = Object.values(sub.vols).filter(v => v !== undefined);
         const minVol = Math.min(...vols);
-        const pct = ((minVol - v0) / v0) * 100;
-        waterfallData.push({ label: sub.id, pct, color: COLORS[ci % COLORS.length] });
+        waterfallData.push({ label: sub.id, pct: ((minVol - v0) / v0) * 100, color: colorMap[g] || '#888' });
       });
     });
     waterfallData.sort((a, b) => a.pct - b.pct);
@@ -520,45 +686,40 @@ const StudyDetailView = (() => {
       type: 'bar',
       data: {
         labels: waterfallData.map(d => d.label),
-        datasets: [{
-          data: waterfallData.map(d => d.pct),
-          backgroundColor: waterfallData.map(d => d.color),
-          borderColor: waterfallData.map(d => d.color),
-          borderWidth: 1
-        }]
+        datasets: [{ data: waterfallData.map(d => d.pct), backgroundColor: waterfallData.map(d => d.color), borderColor: waterfallData.map(d => d.color), borderWidth: 1 }]
       },
-      options: { responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false },
-          annotation: { annotations: [{ type: 'line', yMin: -30, yMax: -30, borderColor: '#dc3545', borderDash: [5, 5] }] } },
-        scales: { x: { ticks: { font: { size: 9 } } },
-          y: { title: { display: true, text: 'Best % Change from BL' },
-            grid: { color: ctx => ctx.tick.value === 0 ? '#333' : 'rgba(0,0,0,0.1)' } } }
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 9 } } },
+          y: { title: { display: true, text: 'Best % Change from BL' } }
+        }
       }
     });
 
-    // Chart 5: Body weight % baseline
     destroyChart('bw');
     charts['bw'] = new Chart(document.getElementById('chartBW'), {
       type: 'line',
       data: {
         labels: days.map(d => 'Day ' + d),
-        datasets: groupNames.map((g, ci) => {
+        datasets: groupNames.map(g => {
           const bl = bwStats[g][days[0]]?.mean;
           return {
             label: g,
             data: days.map(d => bwStats[g][d]?.mean != null && bl ? (bwStats[g][d].mean / bl) * 100 : null),
-            borderColor: COLORS[ci % COLORS.length], backgroundColor: COLORS[ci % COLORS.length],
+            borderColor: colorMap[g] || '#888', backgroundColor: colorMap[g] || '#888',
             fill: false, tension: 0.2, pointRadius: 4
           };
         })
       },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: {
+        responsive: true, maintainAspectRatio: false,
         plugins: { legend: { position: 'top' } },
         scales: { x: { title: { display: true, text: 'Days' } }, y: { title: { display: true, text: 'BW (% of Day 1)' } } }
       }
     });
 
-    // Chart 6: Necropsy tumor weight
     destroyChart('necropsy');
     const nGroups = groupNames.filter(g => necropsyStats[g]?.n > 0);
     charts['necropsy'] = new Chart(document.getElementById('chartNecropsy'), {
@@ -567,8 +728,8 @@ const StudyDetailView = (() => {
         labels: nGroups,
         datasets: [{
           data: nGroups.map(g => necropsyStats[g]?.mean ?? 0),
-          backgroundColor: nGroups.map((_, i) => COLORS[i % COLORS.length]),
-          borderColor: nGroups.map((_, i) => COLORS[i % COLORS.length]),
+          backgroundColor: nGroups.map(g => colorMap[g] || '#888'),
+          borderColor: nGroups.map(g => colorMap[g] || '#888'),
           borderWidth: 1,
           errorBars: nGroups.reduce((acc, g) => {
             acc[g] = { plus: necropsyStats[g]?.[ebKey] ?? 0, minus: necropsyStats[g]?.[ebKey] ?? 0 };
@@ -576,19 +737,22 @@ const StudyDetailView = (() => {
           }, {})
         }]
       },
-      options: { responsive: true, maintainAspectRatio: false,
+      options: {
+        responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: { y: { title: { display: true, text: 'Tumor Weight (mg)' }, beginAtZero: true } }
       }
     });
   }
 
-  function renderEfficacyTable(metrics, controlGroup) {
+  function renderEfficacyTable(metrics, controlGroup, colorMap) {
     const container = document.getElementById('efficacyTable');
     if (!container) return;
-    const rows = Object.entries(metrics).map(([grp, m]) => `
-      <tr ${grp === controlGroup ? 'class="table-secondary"' : ''}>
-        <td class="fw-bold">${grp} ${grp === controlGroup ? '<span class="badge bg-secondary">Control</span>' : ''}</td>
+    const rows = Object.entries(metrics).map(([grp, m]) => {
+      const color = colorMap?.[grp] || '';
+      const dot = color ? `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};margin-right:5px"></span>` : '';
+      return `<tr ${grp === controlGroup ? 'class="table-secondary"' : ''}>
+        <td class="fw-bold">${dot}${grp} ${grp === controlGroup ? '<span class="badge bg-secondary">Control</span>' : ''}</td>
         <td>${m.N}</td>
         <td>${m.orr?.toFixed(1) ?? 'N/A'}</td>
         <td>${m.meanTTR?.toFixed(1) ?? 'N/A'}</td>
@@ -600,7 +764,8 @@ const StudyDetailView = (() => {
         <td>${m.tgi21_Delta != null ? m.tgi21_Delta.toFixed(1) : 'N/A'}</td>
         <td>${m.tgi42_TC != null ? m.tgi42_TC.toFixed(1) : 'N/A'}</td>
         <td>${m.tgi42_Delta != null ? m.tgi42_Delta.toFixed(1) : 'N/A'}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     container.innerHTML = `
       <div class="card p-3">
@@ -660,7 +825,7 @@ const StudyDetailView = (() => {
             <button class="btn btn-dark btn-sm w-100" onclick="StudyDetailView.runStats()">비교</button>
           </div>
         </div>
-        <div id="daySelectContainer" class="mb-3" style="display:none">
+        <div id="daySelectContainer" class="mb-3 d-none">
           <div class="d-flex flex-wrap gap-2">
             ${days.map(d => `<div class="form-check form-check-inline">
               <input class="form-check-input" type="checkbox" id="sd_${d}" value="${d}" checked>
@@ -674,8 +839,7 @@ const StudyDetailView = (() => {
 
   function toggleDaySelect() {
     const mode = document.getElementById('s_dayMode')?.value;
-    const el = document.getElementById('daySelectContainer');
-    if (el) el.style.display = mode === 'select' ? 'block' : 'none';
+    document.getElementById('daySelectContainer')?.classList.toggle('d-none', mode !== 'select');
   }
 
   function runStats() {
@@ -751,15 +915,13 @@ const StudyDetailView = (() => {
     const { study, groups, animals, measurements } = studyData;
     const animalMap = {};
     animals.forEach(a => { animalMap[a.animalId] = a; });
-
     let csv = 'Subject_ID,Group,Day,Tumor_Volume_mm3,Body_Weight_g\n';
     measurements.forEach(m => {
       const a = animalMap[m.animalId];
       if (!a) return;
-      const g = groups.find(g => g.groupId === a.groupId);
-      csv += `${a.subjectId},${g?.groupName || ''},${m.day},${m.tumorVolume ?? ''},${m.bodyWeight ?? ''}\n`;
+      const g = groups.find(gr => gr.groupId === a.groupId);
+      csv += `${a.subjectId},${groupDisplayName(g) || ''},${m.day},${m.tumorVolume ?? ''},${m.bodyWeight ?? ''}\n`;
     });
-
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -776,8 +938,9 @@ const StudyDetailView = (() => {
   }
 
   return {
-    render, switchTab, saveData, pasteData, onGroupSelect, onCellChange,
+    render, switchTab, saveData, pasteData, onCellChange,
+    toggleGroupData, selectAllGroups, switchObsTab,
     runAnalysis, runStats, setErrorBar, toggleGroup, toggleAllGroups,
-    toggleDaySelect, exportCSV, exportJSON
+    applyYScale, toggleDaySelect, exportCSV, exportJSON
   };
 })();

@@ -10,7 +10,9 @@ const SHEETS = {
   ANIMALS: 'animals',
   MEASUREMENTS: 'measurements',
   NECROPSY: 'necropsy',
-  CODES: 'codes'
+  CODES: 'codes',
+  SUBSTANCES: 'substances',
+  COMPETITORS: 'competitors'
 };
 
 function getSpreadsheet() {
@@ -32,17 +34,22 @@ function getOrCreateSheet(ss, name, headers) {
 function initSheets() {
   const ss = getSpreadsheet();
   getOrCreateSheet(ss, SHEETS.STUDIES, [
-    'studyId','studyNumber','year','classification','modelName','cro',
+    'studyId','studyNumber','year','classification','modelName','strain','cro','projectName',
     'protocolLink','reportLink','dataSource','competitorDrug','competitorSource','createdAt','updatedAt'
   ]);
   getOrCreateSheet(ss, SHEETS.GROUPS, [
-    'groupId','studyId','groupNumber','groupName','animalCount',
-    'implantationDate','separationDate','day1Date','necropsyDate','measurementDays','isControl'
+    'groupId','studyId','groupNumber','substanceName','groupRole','animalCount',
+    'implantationDate','separationDate','day1Date','necropsyDate','measurementDays',
+    'dosingSchedule','isControl','sameAsGroup1'
   ]);
-  getOrCreateSheet(ss, SHEETS.ANIMALS, ['animalId','studyId','groupId','subjectId','sex']);
+  getOrCreateSheet(ss, SHEETS.ANIMALS, [
+    'animalId','studyId','groupId','subjectId','randomId','animalNumber','studyAnimalId','sex'
+  ]);
   getOrCreateSheet(ss, SHEETS.MEASUREMENTS, ['measurementId','studyId','animalId','day','tumorVolume','bodyWeight','date']);
   getOrCreateSheet(ss, SHEETS.NECROPSY, ['necropsyId','studyId','animalId','tumorWeight','date']);
   getOrCreateSheet(ss, SHEETS.CODES, ['codeType','codeValue','codeLabel','sortOrder']);
+  getOrCreateSheet(ss, SHEETS.SUBSTANCES, ['substanceId','substanceName','type','target','moa','note']);
+  getOrCreateSheet(ss, SHEETS.COMPETITORS, ['competitorId','companyName','substanceName','indication','source','note']);
   return { success: true };
 }
 
@@ -238,6 +245,44 @@ function getStudyData(studyId) {
   return { study, groups, animals, measurements, necropsy };
 }
 
+// ---- Substances ----
+function getSubstances() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SUBSTANCES);
+  return sheet ? sheetToObjects(sheet) : [];
+}
+function saveSubstance(data) {
+  const ss = getSpreadsheet();
+  initSheets();
+  upsertRow(ss.getSheetByName(SHEETS.SUBSTANCES), 'substanceId', data);
+  return { success: true };
+}
+function deleteSubstance(substanceId) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.SUBSTANCES);
+  if (sheet) deleteRowsWhere(sheet, 'substanceId', substanceId);
+  return { success: true };
+}
+
+// ---- Competitors ----
+function getCompetitors() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.COMPETITORS);
+  return sheet ? sheetToObjects(sheet) : [];
+}
+function saveCompetitor(data) {
+  const ss = getSpreadsheet();
+  initSheets();
+  upsertRow(ss.getSheetByName(SHEETS.COMPETITORS), 'competitorId', data);
+  return { success: true };
+}
+function deleteCompetitor(competitorId) {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.COMPETITORS);
+  if (sheet) deleteRowsWhere(sheet, 'competitorId', competitorId);
+  return { success: true };
+}
+
 // ---- Codes (lookup values) ----
 function getCodes(codeType) {
   const ss = getSpreadsheet();
@@ -286,13 +331,22 @@ function exportAll() {
 function doGet(e) {
   try {
     const p = e.parameter;
+
+    // Handle POST-via-GET (payload param) to avoid CORS preflight
+    if (p.payload) {
+      const body = JSON.parse(decodeURIComponent(p.payload));
+      return handlePost(body.action, body.data);
+    }
+
     let result;
     switch (p.action) {
-      case 'init':        result = initSheets(); break;
-      case 'getStudies':  result = getStudies(p); break;
-      case 'getStudyData': result = getStudyData(p.studyId); break;
-      case 'getCodes':    result = getCodes(p.codeType); break;
-      case 'exportAll':   result = exportAll(); break;
+      case 'init':           result = initSheets(); break;
+      case 'getStudies':     result = getStudies(p); break;
+      case 'getStudyData':   result = getStudyData(p.studyId); break;
+      case 'getCodes':       result = getCodes(p.codeType); break;
+      case 'getSubstances':  result = getSubstances(); break;
+      case 'getCompetitors': result = getCompetitors(); break;
+      case 'exportAll':      result = exportAll(); break;
       default: result = { error: 'Unknown action: ' + p.action };
     }
     return jsonResponse(result);
@@ -301,25 +355,32 @@ function doGet(e) {
   }
 }
 
+function handlePost(action, data) {
+  let result;
+  switch (action) {
+    case 'saveStudy':            result = saveStudy(data); break;
+    case 'deleteStudy':          result = deleteStudy(data.studyId); break;
+    case 'saveGroups':           result = saveGroups(data.studyId, data.groups); break;
+    case 'deleteGroup':          result = deleteGroup(data.groupId); break;
+    case 'saveAnimals':          result = saveAnimals(data.studyId, data.animals); break;
+    case 'bulkSaveMeasurements': result = bulkSaveMeasurements(data.studyId, data.measurements); break;
+    case 'bulkSaveNecropsy':     result = bulkSaveNecropsy(data.studyId, data.records); break;
+    case 'saveCode':             result = saveCode(data); break;
+    case 'deleteCode':           result = deleteCode(data.codeType, data.codeValue); break;
+    case 'saveSubstance':        result = saveSubstance(data); break;
+    case 'deleteSubstance':      result = deleteSubstance(data.substanceId); break;
+    case 'saveCompetitor':       result = saveCompetitor(data); break;
+    case 'deleteCompetitor':     result = deleteCompetitor(data.competitorId); break;
+    case 'importAll':            result = importAll(data); break;
+    default: result = { error: 'Unknown action: ' + action };
+  }
+  return jsonResponse(result);
+}
+
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
-    const { action, data } = body;
-    let result;
-    switch (action) {
-      case 'saveStudy':             result = saveStudy(data); break;
-      case 'deleteStudy':           result = deleteStudy(data.studyId); break;
-      case 'saveGroups':            result = saveGroups(data.studyId, data.groups); break;
-      case 'deleteGroup':           result = deleteGroup(data.groupId); break;
-      case 'saveAnimals':           result = saveAnimals(data.studyId, data.animals); break;
-      case 'bulkSaveMeasurements':  result = bulkSaveMeasurements(data.studyId, data.measurements); break;
-      case 'bulkSaveNecropsy':      result = bulkSaveNecropsy(data.studyId, data.records); break;
-      case 'saveCode':              result = saveCode(data); break;
-      case 'deleteCode':            result = deleteCode(data.codeType, data.codeValue); break;
-      case 'importAll':             result = importAll(data); break;
-      default: result = { error: 'Unknown action: ' + action };
-    }
-    return jsonResponse(result);
+    return handlePost(body.action, body.data);
   } catch(err) {
     return jsonResponse({ error: err.message, stack: err.stack });
   }
